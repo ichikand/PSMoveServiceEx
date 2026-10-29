@@ -431,7 +431,7 @@ private:
         // read into the body.
         //
         m_request_read_buffer.resize(HEADER_SIZE + msg_len);
-        asio::mutable_buffers_1 buf = asio::buffer(&m_request_read_buffer[HEADER_SIZE], msg_len);
+        auto buf = asio::buffer(&m_request_read_buffer[HEADER_SIZE], msg_len);
         asio::async_read(
             m_tcp_socket, buf,
             boost::bind(
@@ -583,7 +583,7 @@ public:
         ClientConnectionPtr new_connection = 
             ClientConnection::create(
                 this, 
-                m_tcp_acceptor.get_io_service(), 
+                m_io_service, 
                 m_udp_socket, 
                 m_request_handler_ref);
 

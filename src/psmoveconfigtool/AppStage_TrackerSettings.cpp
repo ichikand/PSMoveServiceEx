@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 //-- inludes -----
 #include "AppStage_TrackerSettings.h"
 #include "AppStage_TestTracker.h"

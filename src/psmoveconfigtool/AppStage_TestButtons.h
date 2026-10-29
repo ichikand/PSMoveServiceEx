@@ -1,3 +1,4 @@
+#include <string>
 #ifndef APP_STAGE_TEST_BUTTONS_H
 #define APP_STAGE_TEST_BUTTONS_H
 

@@ -1,3 +1,5 @@
+#define BOOST_BIND_GLOBAL_PLACEHOLDERS
+#include <boost/asio.hpp>
 //-- includes -----
 #define BOOST_LIB_DIAGNOSTIC
 
@@ -12,6 +14,8 @@
 #include "USBDeviceManager.h"
 
 #include <boost/asio.hpp>
+#include <boost/bind/placeholders.hpp>
+using namespace boost::placeholders;
 #include <boost/application.hpp>
 #include <boost/program_options.hpp>
 #include <fstream>

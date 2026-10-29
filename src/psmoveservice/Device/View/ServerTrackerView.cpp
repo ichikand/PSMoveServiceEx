@@ -25,7 +25,7 @@
 #include <memory>
 
 #include "opencv2/opencv.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/calib3d.hpp"
 
 #include <algorithm>
 
@@ -559,8 +559,8 @@ public:
             t_opencv_int_contour_list contours;
             cv::findContours(gsLowerROI,
                              contours,
-                             CV_RETR_EXTERNAL,
-                             CV_CHAIN_APPROX_SIMPLE,  //CV_CHAIN_APPROX_NONE?
+                             cv::RETR_EXTERNAL,
+                             cv::CHAIN_APPROX_SIMPLE,  //CV_CHAIN_APPROX_NONE?
                              ofs);
 
             // Compute the area of each contour

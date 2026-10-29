@@ -1,3 +1,9 @@
+#ifndef _WIN32_COMPAT_DEFS
+#define _WIN32_COMPAT_DEFS
+typedef void* HANDLE;
+#define INVALID_HANDLE_VALUE ((void*)-1)
+inline void CloseHandle(HANDLE) {}
+#endif
 #ifndef EXTERNAL_ORIENTATION_FILTER_H
 #define EXTERNAL_ORIENTATION_FILTER_H
 

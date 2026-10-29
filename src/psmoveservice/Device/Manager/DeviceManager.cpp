@@ -30,7 +30,7 @@ static const int k_default_hmd_reconnect_interval= 10000; // ms
 class DeviceManagerConfig : public PSMoveConfig
 {
 public:
-    static const int CONFIG_VERSION= 1;
+    static constexpr int CONFIG_VERSION = 1;
 
     DeviceManagerConfig(const std::string &fnamebase = "DeviceManagerConfig")
         : PSMoveConfig(fnamebase)

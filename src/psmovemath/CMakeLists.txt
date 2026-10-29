@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 
 set(ROOT_DIR ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(PSMOVE_MATH_INCL_DIRS)

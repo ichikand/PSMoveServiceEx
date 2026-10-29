@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 // Derived From example 11-1 of "Learning OpenCV: Computer Vision with the OpenCV Library" by Gary Bradski
 
 //-- includes -----
@@ -21,7 +22,7 @@
 #include <imgui.h>
 
 #include "opencv2/opencv.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/calib3d.hpp"
 
 #include <vector>
 

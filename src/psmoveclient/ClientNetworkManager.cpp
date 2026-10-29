@@ -1,3 +1,5 @@
+#include <boost/asio.hpp>
+namespace boost { namespace asio { using io_service = io_context; } }
 //-- includes -----
 #include "ClientNetworkManager.h"
 #include "ClientLog.h"
@@ -70,7 +72,7 @@ public:
     bool start()
     {
         tcp::resolver resolver(m_io_service);
-        tcp::resolver::iterator endpoint_iter= resolver.resolve(tcp::resolver::query(tcp::v4(), m_server_host, m_server_port));
+        tcp::resolver::results_type::iterator endpoint_iter= resolver.resolve(tcp::v4(), m_server_host, m_server_port).begin();
 
         m_connection_stopped= false;
         bool success= start_tcp_connect(endpoint_iter);
@@ -173,11 +175,11 @@ public:
     }
 
 private:
-    bool start_tcp_connect(tcp::resolver::iterator endpoint_iter)
+    bool start_tcp_connect(tcp::resolver::results_type::iterator endpoint_iter)
     {
         bool success= true;
 
-        if (endpoint_iter != tcp::resolver::iterator())
+        if (endpoint_iter != tcp::resolver::results_type::iterator())
         {
             CLIENT_LOG_INFO("ClientNetworkManager::start_tcp_connect") << "Connecting to: " << endpoint_iter->endpoint() << "..." << std::endl;
 
@@ -203,7 +205,7 @@ private:
 
     void handle_tcp_connect(
         const boost::system::error_code& ec,
-        tcp::resolver::iterator endpoint_iter)
+        tcp::resolver::results_type::iterator endpoint_iter)
     {
         if (m_connection_stopped)
             return;
@@ -430,7 +432,7 @@ private:
         // m_read_buffer already contains the header in its first HEADER_SIZE bytes. 
         // Expand it to fit in the body as well, and start async read into the body.
         m_response_read_buffer.resize(HEADER_SIZE + msg_len);
-        asio::mutable_buffers_1 buffer = asio::buffer(&m_response_read_buffer[HEADER_SIZE], msg_len);
+        auto buffer = asio::buffer(&m_response_read_buffer[HEADER_SIZE], msg_len);
         asio::async_read(
             m_tcp_socket, 
             buffer,

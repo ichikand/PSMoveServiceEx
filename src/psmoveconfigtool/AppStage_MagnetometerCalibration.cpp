@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 //-- inludes -----
 #include "AppStage_MagnetometerCalibration.h"
 #include "AppStage_ControllerSettings.h"

@@ -1,3 +1,4 @@
+#include <string>
 #ifndef APP_STAGE_PAIR_CONTROLLER_H
 #define APP_STAGE_PAIR_CONTROLLER_H
 

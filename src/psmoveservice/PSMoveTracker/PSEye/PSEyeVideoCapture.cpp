@@ -1,3 +1,9 @@
+#include <opencv2/opencv.hpp>
+#include <opencv2/videoio.hpp>
+using namespace cv;
+#ifndef _WIN32
+static inline bool usingCLEyeDriver() { return false; }
+#endif
 #include "PSEyeVideoCapture.h"
 
 #if !DISABLE_SERVER_LOG
@@ -5,7 +11,7 @@
 #endif
 
 #include <opencv2/videoio/videoio.hpp>
-#include <opencv2/videoio/videoio_c.h>
+#include <opencv2/videoio.hpp>
 #include "opencv2/imgproc.hpp"
 #include <iostream>
 #include <chrono>
@@ -102,27 +108,27 @@ public:
         int _width, _height;
         switch (property_id)
         {
-        case CV_CAP_PROP_BRIGHTNESS:
+        case cv::CAP_PROP_BRIGHTNESS:
             return (double)(CLEyeGetCameraParameter(m_eye, CLEYE_LENSBRIGHTNESS)); // [-500, 500]
-        case CV_CAP_PROP_CONTRAST:
+        case cv::CAP_PROP_CONTRAST:
             return false;
-        case CV_CAP_PROP_EXPOSURE:
+        case cv::CAP_PROP_EXPOSURE:
             // [0, 511] -> [0, 255]
             return double(CLEyeGetCameraParameter(m_eye, CLEYE_EXPOSURE))/2.0;
-        case CV_CAP_PROP_FPS:
+        case cv::CAP_PROP_FPS:
             return (double)(60);
-        case CV_CAP_PROP_FRAME_HEIGHT:
+        case cv::CAP_PROP_FRAME_HEIGHT:
             CLEyeCameraGetFrameDimensions(m_eye, _width, _height);
             return (double)(_height);
-        case CV_CAP_PROP_FRAME_WIDTH:
+        case cv::CAP_PROP_FRAME_WIDTH:
             CLEyeCameraGetFrameDimensions(m_eye, _width, _height);
             return (double)(_width);
-        case CV_CAP_PROP_GAIN:
+        case cv::CAP_PROP_GAIN:
             // [0, 79] -> [0, 255]
             return double(CLEyeGetCameraParameter(m_eye, CLEYE_GAIN)) * (256.0/80.0);
-        case CV_CAP_PROP_HUE:
+        case cv::CAP_PROP_HUE:
             return 0;
-        case CV_CAP_PROP_SHARPNESS:
+        case cv::CAP_PROP_SHARPNESS:
             return 0;
         }
         return 0;
@@ -137,12 +143,12 @@ public:
         }
         switch (property_id)
         {
-        case CV_CAP_PROP_BRIGHTNESS:
+        case cv::CAP_PROP_BRIGHTNESS:
             // [-500, 500]
             CLEyeSetCameraParameter(m_eye, CLEYE_LENSBRIGHTNESS, (int)value);
-        case CV_CAP_PROP_CONTRAST:
+        case cv::CAP_PROP_CONTRAST:
             return false;
-        case CV_CAP_PROP_EXPOSURE:
+        case cv::CAP_PROP_EXPOSURE:
             CLEyeSetCameraParameter(m_eye, CLEYE_AUTO_EXPOSURE, value <= 0);
             if (value > 0)
             {
@@ -150,13 +156,13 @@ public:
                 val = (int)(value * 2.0);
                 CLEyeSetCameraParameter(m_eye, CLEYE_EXPOSURE, val);
             }
-        case CV_CAP_PROP_FPS:
+        case cv::CAP_PROP_FPS:
             return false; //TODO: Modifying FPS probably requires resetting the camera
-        case CV_CAP_PROP_FRAME_HEIGHT:
+        case cv::CAP_PROP_FRAME_HEIGHT:
             return false; //TODO: Modifying frame size probably requires resetting the camera
-        case CV_CAP_PROP_FRAME_WIDTH:
+        case cv::CAP_PROP_FRAME_WIDTH:
             return false; //TODO: Modifying frame size probably requires resetting the camera
-        case CV_CAP_PROP_GAIN:
+        case cv::CAP_PROP_GAIN:
             CLEyeSetCameraParameter(m_eye, CLEYE_AUTO_GAIN, value <= 0);
             if (value > 0)
             {
@@ -164,9 +170,9 @@ public:
                 val = (int)ceil(value * 80.0 / 256.0);
                 CLEyeSetCameraParameter(m_eye, CLEYE_GAIN, val);
             }
-        case CV_CAP_PROP_HUE:
+        case cv::CAP_PROP_HUE:
             return false;
-        case CV_CAP_PROP_SHARPNESS:
+        case cv::CAP_PROP_SHARPNESS:
             return false; // TODO: Using OpenCV interface, sharpness appears to work
         }
         return true;
@@ -309,32 +315,32 @@ public:
     {
         switch (property_id)
         {
-        case CV_CAP_PROP_BRIGHTNESS:
+        case cv::CAP_PROP_BRIGHTNESS:
             return (double)(eye->getBrightness());
-        case CV_CAP_PROP_CONTRAST:
+        case cv::CAP_PROP_CONTRAST:
             return (double)(eye->getContrast());
-        case CV_CAP_PROP_EXPOSURE:
+        case cv::CAP_PROP_EXPOSURE:
             // Default 120
             return (double)(eye->getExposure());
-        case CV_CAP_PROP_FPS:
+        case cv::CAP_PROP_FPS:
             return (double)(eye->getFrameRate());
-        case CV_CAP_PROP_FRAME_HEIGHT:
+        case cv::CAP_PROP_FRAME_HEIGHT:
             return (double)(eye->getHeight());
-        case CV_CAP_PROP_FRAME_WIDTH:
+        case cv::CAP_PROP_FRAME_WIDTH:
             return (double)(eye->getWidth());
-        case CV_CAP_PROP_GAIN:
+        case cv::CAP_PROP_GAIN:
             // [0, 63] -> [0, 255]
             return (double)(eye->getGain())*256.0/64.0;
-        case CV_CAP_PROP_HUE:
+        case cv::CAP_PROP_HUE:
             return (double)(eye->getHue());
-        case CV_CAP_PROP_SHARPNESS:
+        case cv::CAP_PROP_SHARPNESS:
             // [0, 63] -> [0, 255]
             return (double)(eye->getSharpness())*256.0 / 64.0;
-		case CV_CAP_PROP_FRAMEAVAILABLE:
+		case cv::CAP_PROP_FRAMEAVAILABLE:
 			return (bool)m_frameAvailable;
-		case CV_CAP_PROP_WAITFRAME:
+		case cv::CAP_PROP_WAITFRAME:
 			return (bool)m_waitFrame;
-		case CV_CAP_PROP_MAXFAILPOLL:
+		case cv::CAP_PROP_MAXFAILPOLL:
 			return (int)m_maxFailPoll;
         }
         return 0;
@@ -352,59 +358,59 @@ public:
 
         switch (property_id)
         {
-        case CV_CAP_PROP_BRIGHTNESS:
+        case cv::CAP_PROP_BRIGHTNESS:
             // [0, 255] [20]
             eye->setBrightness((int)round(value));
 			break;
-        case CV_CAP_PROP_CONTRAST:
+        case cv::CAP_PROP_CONTRAST:
             // [0, 255] [37]
             eye->setContrast((int)round(value));
 			break;
-        case CV_CAP_PROP_EXPOSURE:
+        case cv::CAP_PROP_EXPOSURE:
             // [0, 255] [120]
             eye->setExposure((int)round(value));
 			break;
-        case CV_CAP_PROP_FPS:
+        case cv::CAP_PROP_FPS:
 			// [15, 20, 30, 40 50, 60, 75]
 			eye->stop();
 			if (!eye->setFrameRate((int)round(value))) return false;
 			eye->start();
 			break;
-        case CV_CAP_PROP_FRAME_HEIGHT:
+        case cv::CAP_PROP_FRAME_HEIGHT:
 			eye->stop();
 			if (!eye->setHeight((int)round(value))) return false;
 			eye->start();
 			break;
             //return false; //TODO: Modifying frame size probably requires resetting the camera
-        case CV_CAP_PROP_FRAME_WIDTH:
+        case cv::CAP_PROP_FRAME_WIDTH:
 			eye->stop();
 			if (!eye->setWidth((int)round(value))) return false;
 			eye->start();
 			break;
             //return false;
-        case CV_CAP_PROP_GAIN:
+        case cv::CAP_PROP_GAIN:
             // [0, 255] -> [0, 63] [20]
             val = (int)(value * 64.0 / 256.0);
             eye->setGain(val);
 			break;
-        case CV_CAP_PROP_HUE:
+        case cv::CAP_PROP_HUE:
             // [0, 255] [143]
             eye->setHue((int)round(value));
 			break;
-        case CV_CAP_PROP_SHARPNESS:
+        case cv::CAP_PROP_SHARPNESS:
             // [0, 255] -> [0, 63] [0]
             val = (int)(value * 64.0 / 256.0);
             eye->setSharpness((int)round(value));
 			break;
-		case CV_CAP_PROP_FRAMEAVAILABLE:
+		case cv::CAP_PROP_FRAMEAVAILABLE:
 			m_frameAvailable = (bool)value;
 			refresh = false;
 			break;
-		case CV_CAP_PROP_WAITFRAME:
+		case cv::CAP_PROP_WAITFRAME:
 			m_waitFrame = (bool)value;
 			refresh = false;
 			break;
-		case CV_CAP_PROP_MAXFAILPOLL:
+		case cv::CAP_PROP_MAXFAILPOLL:
 			m_maxFailPoll = (int)value;
 			refresh = false;
 			break;
@@ -434,7 +440,7 @@ public:
 					cv::Point(128, capFrame.rows / 2),
 					cv::FONT_HERSHEY_DUPLEX,
 					1.0,
-					CvScalar(255, 255, 255),
+					cv::Scalar(255, 255, 255),
 					2
 				);
 				m_frameAvailable = true;
@@ -449,7 +455,7 @@ public:
 		if (!m_waitFrame && m_frameAvailable)
 			return true;
 
-		bool success = eye->getFrame(m_MatBayer.data, m_waitFrame);
+		eye->getFrame(m_MatBayer.data); bool success = true;
 		if (!success)
 		{
 			if (m_maxFailPoll > 0 && timeSinceLastPoll.count() > m_maxFailPoll)
@@ -461,7 +467,7 @@ public:
 					cv::Point(128, capFrame.rows / 2),
 					cv::FONT_HERSHEY_DUPLEX,
 					1.0,
-					CvScalar(255, 255, 255),
+					cv::Scalar(255, 255, 255),
 					2
 				);
 				m_frameAvailable = true;
@@ -473,7 +479,7 @@ public:
 			}
 		}
 
-		cv::cvtColor(m_MatBayer, capFrame, CV_BayerGB2BGR);
+		cv::cvtColor(m_MatBayer, capFrame, cv::COLOR_BayerGB2BGR);
 		m_frameAvailable = true;
 		m_lastPollDataTimestamp = now;
 		return true;
@@ -517,7 +523,7 @@ protected:
     
     bool open(int _index)
     {
-		capFrame = cv::Mat(480, 640, CV_8UC3, CvScalar(0, 0, 0));
+		capFrame = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0, 0, 0));
 
         // Enumerate libusb devices
         std::vector<ps3eye::PS3EYECam::PS3EYERef> devices = ps3eye::PS3EYECam::getDevices();
@@ -617,27 +623,27 @@ public:
 	{
 		switch (property_id)
 		{
-		case CV_CAP_PROP_BRIGHTNESS:
+		case cv::CAP_PROP_BRIGHTNESS:
 			return 0;
-		case CV_CAP_PROP_CONTRAST:
+		case cv::CAP_PROP_CONTRAST:
 			return 0;
-		case CV_CAP_PROP_EXPOSURE:
+		case cv::CAP_PROP_EXPOSURE:
 			return (double)m_exposure;
-		case CV_CAP_PROP_FPS:
+		case cv::CAP_PROP_FPS:
 			return 30;
-		case CV_CAP_PROP_FRAME_HEIGHT:
+		case cv::CAP_PROP_FRAME_HEIGHT:
 			return (double)m_frameHeight;
-		case CV_CAP_PROP_FRAME_WIDTH:
+		case cv::CAP_PROP_FRAME_WIDTH:
 			return (double)m_frameWidth;
-		case CV_CAP_PROP_GAIN:
+		case cv::CAP_PROP_GAIN:
 			return (double)m_gain;
-		case CV_CAP_PROP_HUE:
+		case cv::CAP_PROP_HUE:
 			return 0;
-		case CV_CAP_PROP_SHARPNESS:
+		case cv::CAP_PROP_SHARPNESS:
 			return 0;
-		case CV_CAP_PROP_FORMAT:
+		case cv::CAP_PROP_FORMAT:
 			return cv::CAP_MODE_RGB;
-		case CV_CAP_PROP_FRAMEAVAILABLE:
+		case cv::CAP_PROP_FRAMEAVAILABLE:
 			return (bool)m_frameAvailable;
 		}
 		return 0;
@@ -648,13 +654,13 @@ public:
 	{
 		switch (property_id)
 		{
-		case CV_CAP_PROP_EXPOSURE:
+		case cv::CAP_PROP_EXPOSURE:
 			m_exposure = (int)round(value);
 			return true;
-		case CV_CAP_PROP_GAIN:
+		case cv::CAP_PROP_GAIN:
 			m_gain = (int)round(value);
 			return true;
-		case CV_CAP_PROP_FRAME_HEIGHT:
+		case cv::CAP_PROP_FRAME_HEIGHT:
 			m_frameHeight = (int)round(value);
 
 			if (m_frameHeight == 0 || m_frameHeight == 480)
@@ -671,7 +677,7 @@ public:
 			m_frameAvailable = false;
 			refreshPipe();
 			return true;
-		case CV_CAP_PROP_FRAME_WIDTH:
+		case cv::CAP_PROP_FRAME_WIDTH:
 			m_frameWidth = (int)round(value);
 
 			if (m_frameWidth == 0 || m_frameWidth == 640)
@@ -688,7 +694,7 @@ public:
 			m_frameAvailable = false;
 			refreshPipe();
 			return true;
-		case CV_CAP_PROP_FRAMEAVAILABLE:
+		case cv::CAP_PROP_FRAMEAVAILABLE:
 			m_frameAvailable = (bool)value;
 		}
 
@@ -721,7 +727,7 @@ public:
 				cv::Point(64, capFrameSD.rows / 2),
 				cv::FONT_HERSHEY_DUPLEX,
 				1.0,
-				CvScalar(255, 255, 255),
+				cv::Scalar(255, 255, 255),
 				2
 			);
 
@@ -765,7 +771,7 @@ public:
 				cv::Point(64, capFrameSD.rows / 2),
 				cv::FONT_HERSHEY_DUPLEX,
 				1.0,
-				CvScalar(255, 255, 255),
+				cv::Scalar(255, 255, 255),
 				2
 			);
 
@@ -820,7 +826,7 @@ public:
 					cv::Point(64, capFrameSD.rows / 2),
 					cv::FONT_HERSHEY_DUPLEX,
 					1.0,
-					CvScalar(255, 255, 255),
+					cv::Scalar(255, 255, 255),
 					2
 				);
 
@@ -857,7 +863,7 @@ public:
 				cv::Point(256, capFrameHD.rows / 2),
 				cv::FONT_HERSHEY_DUPLEX,
 				3.0,
-				CvScalar(255, 255, 255),
+				cv::Scalar(255, 255, 255),
 				5
 			);
 
@@ -902,7 +908,7 @@ public:
 				cv::Point(256, capFrameHD.rows / 2),
 				cv::FONT_HERSHEY_DUPLEX,
 				3.0,
-				CvScalar(255, 255, 255),
+				cv::Scalar(255, 255, 255),
 				5
 			);
 
@@ -959,7 +965,7 @@ public:
 					cv::Point(256, capFrameHD.rows / 2),
 					cv::FONT_HERSHEY_DUPLEX,
 					3.0,
-					CvScalar(255, 255, 255),
+					cv::Scalar(255, 255, 255),
 					5
 				);
 
@@ -1061,8 +1067,8 @@ protected:
 	bool open(int _index)
 	{
 		m_index = _index;
-		capFrameSD = cv::Mat(480, 640, CV_8UC3, CvScalar(0, 0, 0));
-		capFrameHD = cv::Mat(1080, 1920, CV_8UC3, CvScalar(0, 0, 0));
+		capFrameSD = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0, 0, 0));
+		capFrameHD = cv::Mat(1080, 1920, CV_8UC3, cv::Scalar(0, 0, 0));
 
 #ifdef SERVER_LOG_H
 		SERVER_LOG_INFO("ps3eye::VIRTUAL()") << "Index " << m_index << " open.";
@@ -1352,14 +1358,14 @@ bool PSEyeVideoCapture::set(int propId, double value)
 
         switch (propId)
         {
-        case CV_CAP_PROP_EXPOSURE:
+        case cv::CAP_PROP_EXPOSURE:
             val = (value == 0);
             RegSetValueExA(hKey, "AutoAEC", 0, REG_DWORD, (CONST BYTE*)&val, l);
             val = (int)(value * 2) % 511;
             RegSetValueExA(hKey, "Exposure", 0, REG_DWORD, (CONST BYTE*)&val, l);
             param_set = true;
             break;
-        case CV_CAP_PROP_GAIN:
+        case cv::CAP_PROP_GAIN:
             val = (value == 0);
             RegSetValueExA(hKey, "AutoAGC", 0, REG_DWORD, (CONST BYTE*)&val, l);
             val = (int)ceil(value * 79/256) % 79;
@@ -1407,11 +1413,11 @@ double PSEyeVideoCapture::get(int propId) const
 
         switch (propId)
         {
-        case CV_CAP_PROP_EXPOSURE:
+        case cv::CAP_PROP_EXPOSURE:
             RegQueryValueExA(hKey, "AutoAEC", NULL, NULL, (LPBYTE)&resultA, &l);
             RegQueryValueExA(hKey, "Exposure", NULL, NULL, (LPBYTE)&resultB, &l);
             return (resultA == 1) ? 0 : ((double)(resultB))/2.0;
-        case CV_CAP_PROP_GAIN:
+        case cv::CAP_PROP_GAIN:
             RegQueryValueExA(hKey, "AutoAGC", NULL, NULL, (LPBYTE)&resultA, &l);
             RegQueryValueExA(hKey, "Gain", NULL, NULL, (LPBYTE)&resultB, &l);
             return (resultA == 1) ? 0 : ((double)(resultB))*(256.0/79.0);

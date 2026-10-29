@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 //-- includes -----
 #include "AppSubStage_CalibrateWithMat.h"
 #include "AppStage_ComputeTrackerPoses.h"
@@ -19,7 +20,7 @@
 #include "SDL_opengl.h"
 
 #include "opencv2/opencv.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/calib3d.hpp"
 
 #include <imgui.h>
 #include <vector>

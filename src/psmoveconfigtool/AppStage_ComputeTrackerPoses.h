@@ -1,3 +1,4 @@
+#include <string>
 #ifndef APP_STAGE_COMPUTE_TRACKER_POSES_H
 #define APP_STAGE_COMPUTE_TRACKER_POSES_H
 

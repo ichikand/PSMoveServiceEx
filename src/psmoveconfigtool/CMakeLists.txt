@@ -43,8 +43,9 @@ file(GLOB PSMOVECONFIGTOOL_SRC
 
 # PSMoveConfigTool
 add_executable(PSMoveConfigTool ${PSMOVECONFIGTOOL_SRC})
+target_include_directories(PSMoveConfigTool PRIVATE /usr/include/opencv4)
 target_include_directories(PSMoveConfigTool PUBLIC ${PSMOVECONFIGTOOL_INCL_DIRS})
-target_link_libraries(PSMoveConfigTool ${PSMOVECONFIGTOOL_REQ_LIBS})
+target_link_libraries(PSMoveConfigTool ${PSMOVECONFIGTOOL_REQ_LIBS} boost_filesystem)
 
 IF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 add_dependencies(PSMoveService opencv)

@@ -1,3 +1,4 @@
+#include <string>
 //-- includes -----
 #include "LibUSBApi.h"
 #include "LibUSBBulkTransferBundle.h"
@@ -161,6 +162,7 @@ USBDeviceState *LibUSBApi::open_usb_device(USBDeviceEnumerator* enumerator)
 		int res = libusb_open(libusb_device_state->device, &libusb_device_state->device_handle);
 		if (res == LIBUSB_SUCCESS)
 		{
+            libusb_set_auto_detach_kernel_driver(libusb_device_state->device_handle, 1);
 			res = libusb_claim_interface(libusb_device_state->device_handle, 0);
 			if (res == 0)
 			{
@@ -685,24 +687,15 @@ static bool libusb_device_get_port_path(libusb_device *dev, char *outBuffer, siz
 		int port_count = libusb_get_port_numbers(dev, port_numbers, MAX_USB_DEVICE_PORT_PATH);
 		int bus_id = libusb_get_bus_number(dev);
 
-		ServerUtility::format_string(outBuffer, bufferSize, "b%d", bus_id);
-		if (port_count > 0)
-		{
-			bSuccess = true;
-
-			for (int port_index = 0; port_index < port_count; ++port_index)
-			{
-				uint8_t port_number = port_numbers[port_index];
-
-				if (ServerUtility::format_string(
-					outBuffer, bufferSize,
-					(port_index == 0) ? "%s_p%d" : "%s.%d",
-					outBuffer, port_number) < 0)
-				{
-					bSuccess = false;
-					break;
-				}
+		if (port_count > 0) {
+			std::string p = "b" + std::to_string(bus_id);
+			for (int port_index = 0; port_index < port_count; ++port_index) {
+				if (port_index == 0) p += "_p" + std::to_string(port_numbers[port_index]);
+				else p += "." + std::to_string(port_numbers[port_index]);
 			}
+			strncpy(outBuffer, p.c_str(), bufferSize - 1);
+			outBuffer[bufferSize - 1] = 0;
+			bSuccess = true;
 		}
 	}
 

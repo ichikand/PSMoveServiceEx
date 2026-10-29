@@ -149,9 +149,9 @@ IF(MSVC)
 ENDIF()
 SET(Boost_DEBUG                OFF) #Switch this and next to ON for help debugging Boost problems.
 SET(Boost_DETAILED_FAILURE_MSG OFF)
-set(Boost_USE_STATIC_LIBS      ON) # only find static libs
+set(Boost_USE_STATIC_LIBS OFF) # only find static libs
 set(Boost_USE_MULTITHREADED    ON)
-set(Boost_USE_STATIC_RUNTIME   ON) #Not default. Because our app is linking against static runtime (see above).
+set(Boost_USE_STATIC_RUNTIME OFF) #Not default. Because our app is linking against static runtime (see above).
 find_package(Boost REQUIRED)  # Future targets can specify components.
 
 
@@ -203,7 +203,7 @@ set(PSEYE_SRC)
 set(PSEYE_INCLUDE_DIRS)
 set(PSEYE_LIBRARIES)
 # PS3EYEDriver - only necessary on Mac and Win64, but can be used in Win32 (I think)
-IF (${CMAKE_SYSTEM_NAME} MATCHES "Darwin"
+IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux" OR ${CMAKE_SYSTEM_NAME} MATCHES "Darwin"
     OR (${CMAKE_SYSTEM_NAME} MATCHES "Windows"))
     #PS3EYEDriver
     list(APPEND PSEYE_INCLUDE_DIRS ${ROOT_DIR}/thirdparty/PS3EYEDriver/src)
@@ -215,7 +215,7 @@ IF (${CMAKE_SYSTEM_NAME} MATCHES "Darwin"
     list(APPEND PSEYE_INCLUDE_DIRS ${LIBUSB_INCLUDE_DIR})
     list(APPEND PSEYE_LIBRARIES ${LIBUSB_LIBRARIES})
     add_definitions(-DHAVE_PS3EYE)
-    IF (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux" OR ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-braced-scalar-init")
     ENDIF()
 ENDIF()
