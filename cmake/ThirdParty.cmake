@@ -45,8 +45,6 @@ ELSEIF(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     MESSAGE(STATUS "Using homebrew Eigen3")
     find_package(Eigen3 REQUIRED CONFIG PATHS /usr/local/opt/eigen/lib/cmake/eigen3)
 ELSE()
-    LIST(APPEND CMAKE_MODULE_PATH "${ROOT_DIR}/thirdparty/eigen/cmake")
-    SET(ENV{EIGEN3_ROOT} "/usr/include/eigen3")
     find_package(Eigen3 REQUIRED)
 ENDIF()
 

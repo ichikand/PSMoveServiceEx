@@ -182,6 +182,12 @@ static bool bluez_provision_device_info(const std::string &host_mac, const std::
         return false;
     }
 
+    std::filesystem::permissions(dir_path,
+        std::filesystem::perms::owner_all |
+        std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
+        std::filesystem::perms::others_read | std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::replace, ec);
+
     std::ofstream info_file(file_path, std::ios::trunc);
     if (!info_file.is_open())
     {
@@ -199,6 +205,11 @@ static bool bluez_provision_device_info(const std::string &host_mac, const std::
     info_file << "Blocked=false\n";
     info_file << "Services=00001124-0000-1000-8000-00805f9b34fb;\n";
     info_file.close();
+
+    std::filesystem::permissions(file_path,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+        std::filesystem::perms::group_read | std::filesystem::perms::others_read,
+        std::filesystem::perm_options::replace, ec);
 
     return true;
 }
@@ -620,6 +631,10 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
                     SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Configuring BlueZ adapter and provisioning " << mac;
                     was_discoverable = bluez_setup_adapter();
                     bluez_provision_device_info(host_mac, mac);
+
+                    std::system("systemctl restart bluetooth");
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+
                     bluez_trust_device(mac);
                     nextSubStatus = BluetoothPairDeviceState::deviceScan;
                 }
