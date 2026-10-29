@@ -17,6 +17,7 @@ file(GLOB PSMOVE_MATH_LIBRARY_SRC
 add_library(PSMoveMath STATIC ${PSMOVE_MATH_LIBRARY_SRC})
 
 target_include_directories(PSMoveMath PUBLIC ${PSMOVE_MATH_INCL_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(PSMoveMath PUBLIC Eigen3::Eigen)
 set_target_properties(PSMoveMath PROPERTIES
     COMPILE_FLAGS "-DBUILDING_STATIC_LIBRARY -fPIC")
 
