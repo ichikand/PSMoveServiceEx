@@ -87,6 +87,10 @@ ELSE()
     list(APPEND PSMOVESERVICE_PLATFORM_SRC
         ${CMAKE_CURRENT_LIST_DIR}/Platform/BluetoothRequestsLinux.cpp
         ${CMAKE_CURRENT_LIST_DIR}/Platform/BluetoothQueriesLinux.cpp)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GIO REQUIRED gio-2.0)
+    list(APPEND PSMOVE_SERVICE_INCL_DIRS ${GIO_INCLUDE_DIRS})
+    list(APPEND PSMOVE_SERVICE_REQ_LIBS ${GIO_LIBRARIES})
 ENDIF()
 source_group("Platform" FILES ${PSMOVESERVICE_PLATFORM_SRC})
 
