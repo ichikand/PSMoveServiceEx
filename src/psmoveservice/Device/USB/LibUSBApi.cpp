@@ -163,6 +163,11 @@ USBDeviceState *LibUSBApi::open_usb_device(USBDeviceEnumerator* enumerator)
 		if (res == LIBUSB_SUCCESS)
 		{
             libusb_set_auto_detach_kernel_driver(libusb_device_state->device_handle, 1);
+			#if defined(__linux__)
+			if (libusb_kernel_driver_active(libusb_device_state->device_handle, 0) == 1) {
+    			libusb_detach_kernel_driver(libusb_device_state->device_handle, 0);
+			}
+			#endif
 			res = libusb_claim_interface(libusb_device_state->device_handle, 0);
 			if (res == 0)
 			{
