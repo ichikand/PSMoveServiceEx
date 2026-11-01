@@ -1,7 +1,0 @@
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        action.lookup("unit") == "bluetooth.service" &&
-        subject.user == "psmovecam") {
-        return polkit.Result.YES;
-    }
-});
