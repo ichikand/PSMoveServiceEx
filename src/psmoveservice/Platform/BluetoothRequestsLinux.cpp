@@ -56,23 +56,64 @@ SPDX-License-Identifier: Apache-2.0
 #include <chrono>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <future>
+#include <deque>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <assert.h>
-#include <fstream>
-#include <filesystem>
+#include <gio/gio.h>
 
 // -- constants ----
 static const char *k_invalid_bluetooth_host = "00:00:00:00:00:00";
+static const char *k_agent_object_path = "/org/psmoveservice/agent";
+static const char *k_hid_service_uuid = "00001124-0000-1000-8000-00805f9b34fb";
 
 #define CONN_RETRIES 80
 #define CONN_DELAY 300
 #define CONN_CHECK_NUM_TRIES 5
 #define CONN_CHECK_DELAY 300
+#define DBUS_CALL_TIMEOUT_MS 5000
 
-// -- BlueZ helper functions -----
+static const char *k_bluez_agent_introspection_xml =
+    "<node>"
+    "  <interface name='org.bluez.Agent1'>"
+    "    <method name='Release'/>"
+    "    <method name='RequestPinCode'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "      <arg type='s' name='pincode' direction='out'/>"
+    "    </method>"
+    "    <method name='DisplayPinCode'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "      <arg type='s' name='pincode' direction='in'/>"
+    "    </method>"
+    "    <method name='RequestPasskey'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "      <arg type='u' name='passkey' direction='out'/>"
+    "    </method>"
+    "    <method name='DisplayPasskey'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "      <arg type='u' name='passkey' direction='in'/>"
+    "      <arg type='q' name='entered' direction='in'/>"
+    "    </method>"
+    "    <method name='RequestConfirmation'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "      <arg type='u' name='passkey' direction='in'/>"
+    "    </method>"
+    "    <method name='RequestAuthorization'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "    </method>"
+    "    <method name='AuthorizeService'>"
+    "      <arg type='o' name='device' direction='in'/>"
+    "      <arg type='s' name='uuid' direction='in'/>"
+    "    </method>"
+    "    <method name='Cancel'/>"
+    "  </interface>"
+    "</node>";
+
+// -- BlueZ GDBus helper functions -----
 static std::string to_upper_mac(const std::string &mac)
 {
     std::string res = mac;
@@ -98,131 +139,781 @@ static bool is_valid_mac(const std::string &mac)
     return true;
 }
 
-static bool run_cmd_output(const std::string &cmd, std::string &output)
+static std::string bluez_build_device_path(const std::string &adapter_path, const std::string &dev_mac)
 {
-    output.clear();
-    FILE *fp = popen(cmd.c_str(), "r");
-    if (!fp) return false;
+    if (adapter_path.empty() || !is_valid_mac(dev_mac)) return "";
+    std::string formatted = to_upper_mac(dev_mac);
+    std::replace(formatted.begin(), formatted.end(), ':', '_');
+    return adapter_path + "/dev_" + formatted;
+}
 
-    char buf[256];
-    while (fgets(buf, sizeof(buf), fp) != nullptr)
+static GDBusConnection *bluez_get_system_bus()
+{
+    GError *error = nullptr;
+    GDBusConnection *conn = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
+    if (!conn)
     {
-        output += buf;
+        SERVER_MT_LOG_ERROR("BlueZ") << "D-Bus connection failed: " << (error ? error->message : "unknown");
+        if (error) g_error_free(error);
     }
-    return (pclose(fp) == 0);
+    return conn;
 }
 
-static bool bluez_is_connected(const std::string &mac)
+static bool bluez_set_property_bool(
+    GDBusConnection *conn,
+    const std::string &object_path,
+    const char *interface_name,
+    const char *property_name,
+    bool value)
 {
-    std::string out;
-    std::string cmd = "bluetoothctl info " + to_upper_mac(mac) + " 2>&1";
-    run_cmd_output(cmd, out);
-    return (out.find("Connected: yes") != std::string::npos);
+    if (!conn || object_path.empty()) return false;
+
+    GError *error = nullptr;
+    GVariant *res = g_dbus_connection_call_sync(
+        conn,
+        "org.bluez",
+        object_path.c_str(),
+        "org.freedesktop.DBus.Properties",
+        "Set",
+        g_variant_new("(ssv)", interface_name, property_name, g_variant_new_boolean(value ? TRUE : FALSE)),
+        nullptr,
+        G_DBUS_CALL_FLAGS_NONE,
+        DBUS_CALL_TIMEOUT_MS,
+        nullptr,
+        &error);
+
+    if (!res)
+    {
+        SERVER_MT_LOG_ERROR("BlueZ") << "Set property '" << property_name << "' on '" << interface_name << "' failed: " << (error ? error->message : "unknown");
+        if (error) g_error_free(error);
+        return false;
+    }
+
+    g_variant_unref(res);
+    return true;
 }
 
-static bool bluez_device_exists(const std::string &mac)
+static bool bluez_get_property_bool(
+    GDBusConnection *conn,
+    const std::string &object_path,
+    const char *interface_name,
+    const char *property_name,
+    bool &out_value)
 {
-    std::string out;
-    std::string cmd = "bluetoothctl info " + to_upper_mac(mac) + " 2>&1";
-    run_cmd_output(cmd, out);
-    return (out.find("Device " + to_upper_mac(mac)) != std::string::npos);
+    if (!conn || object_path.empty()) return false;
+
+    GError *error = nullptr;
+    GVariant *res = g_dbus_connection_call_sync(
+        conn,
+        "org.bluez",
+        object_path.c_str(),
+        "org.freedesktop.DBus.Properties",
+        "Get",
+        g_variant_new("(ss)", interface_name, property_name),
+        G_VARIANT_TYPE("(v)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        DBUS_CALL_TIMEOUT_MS,
+        nullptr,
+        &error);
+
+    if (!res)
+    {
+        SERVER_MT_LOG_ERROR("BlueZ") << "Get property '" << property_name << "' on '" << interface_name << "' failed: " << (error ? error->message : "unknown");
+        if (error) g_error_free(error);
+        return false;
+    }
+
+    GVariant *val = nullptr;
+    g_variant_get(res, "(v)", &val);
+    if (val)
+    {
+        out_value = (g_variant_get_boolean(val) == TRUE);
+        g_variant_unref(val);
+    }
+    g_variant_unref(res);
+    return (val != nullptr);
 }
 
-static void bluez_trust_device(const std::string &mac)
+static std::string bluez_find_adapter_path(GDBusConnection *conn, const std::string &host_mac)
 {
-    std::string out;
-    run_cmd_output("bluetoothctl trust " + to_upper_mac(mac) + " 2>&1", out);
+    if (!conn) return "";
+
+    GVariant *result = g_dbus_connection_call_sync(
+        conn,
+        "org.bluez",
+        "/",
+        "org.freedesktop.DBus.ObjectManager",
+        "GetManagedObjects",
+        nullptr,
+        G_VARIANT_TYPE("(a{oa{sa{sv}}})"),
+        G_DBUS_CALL_FLAGS_NONE,
+        DBUS_CALL_TIMEOUT_MS,
+        nullptr,
+        nullptr);
+
+    if (!result) return "";
+
+    const std::string target_mac = to_upper_mac(host_mac);
+    std::string matched_path;
+    std::string fallback_path;
+
+    GVariantIter *objects_iter = nullptr;
+    g_variant_get(result, "(a{oa{sa{sv}}})", &objects_iter);
+
+    const gchar *object_path = nullptr;
+    GVariantIter *ifaces_iter = nullptr;
+
+    while (g_variant_iter_next(objects_iter, "{&oa{sa{sv}}}", &object_path, &ifaces_iter))
+    {
+        const gchar *iface_name = nullptr;
+        GVariant *props_dict = nullptr;
+
+        while (g_variant_iter_next(ifaces_iter, "{&s@a{sv}}", &iface_name, &props_dict))
+        {
+            if (g_strcmp0(iface_name, "org.bluez.Adapter1") == 0)
+            {
+                if (fallback_path.empty())
+                {
+                    fallback_path = object_path;
+                }
+
+                const gchar *addr = nullptr;
+                if (g_variant_lookup(props_dict, "Address", "&s", &addr) && addr != nullptr)
+                {
+                    if (!target_mac.empty() && to_upper_mac(addr) == target_mac)
+                    {
+                        matched_path = object_path;
+                    }
+                }
+            }
+            g_variant_unref(props_dict);
+        }
+        g_variant_iter_free(ifaces_iter);
+    }
+
+    g_variant_iter_free(objects_iter);
+    g_variant_unref(result);
+
+    return !matched_path.empty() ? matched_path : fallback_path;
+}
+
+static bool bluez_find_device_paths(
+    GDBusConnection *conn,
+    const std::string &dev_mac,
+    std::string &out_device_path,
+    std::string &out_adapter_path)
+{
+    out_device_path.clear();
+    out_adapter_path.clear();
+    if (!conn) return false;
+
+    GVariant *result = g_dbus_connection_call_sync(
+        conn,
+        "org.bluez",
+        "/",
+        "org.freedesktop.DBus.ObjectManager",
+        "GetManagedObjects",
+        nullptr,
+        G_VARIANT_TYPE("(a{oa{sa{sv}}})"),
+        G_DBUS_CALL_FLAGS_NONE,
+        DBUS_CALL_TIMEOUT_MS,
+        nullptr,
+        nullptr);
+
+    if (!result) return false;
+
+    const std::string target_mac = to_upper_mac(dev_mac);
+    GVariantIter *objects_iter = nullptr;
+    g_variant_get(result, "(a{oa{sa{sv}}})", &objects_iter);
+
+    const gchar *object_path = nullptr;
+    GVariantIter *ifaces_iter = nullptr;
+
+    while (g_variant_iter_next(objects_iter, "{&oa{sa{sv}}}", &object_path, &ifaces_iter))
+    {
+        const gchar *iface_name = nullptr;
+        GVariant *props_dict = nullptr;
+
+        while (g_variant_iter_next(ifaces_iter, "{&s@a{sv}}", &iface_name, &props_dict))
+        {
+            if (g_strcmp0(iface_name, "org.bluez.Device1") == 0)
+            {
+                const gchar *addr = nullptr;
+                const gchar *adapter = nullptr;
+                if (g_variant_lookup(props_dict, "Address", "&s", &addr) && addr != nullptr)
+                {
+                    if (to_upper_mac(addr) == target_mac)
+                    {
+                        out_device_path = object_path;
+                        if (g_variant_lookup(props_dict, "Adapter", "&o", &adapter) && adapter != nullptr)
+                        {
+                            out_adapter_path = adapter;
+                        }
+                    }
+                }
+            }
+            g_variant_unref(props_dict);
+        }
+        g_variant_iter_free(ifaces_iter);
+    }
+
+    g_variant_iter_free(objects_iter);
+    g_variant_unref(result);
+
+    return !out_device_path.empty();
+}
+
+static bool bluez_is_connected_by_path(GDBusConnection *conn, const std::string &dev_path)
+{
+    bool connected = false;
+    if (bluez_get_property_bool(conn, dev_path, "org.bluez.Device1", "Connected", connected))
+    {
+        return connected;
+    }
+    return false;
+}
+
+static void bluez_trust_device_by_path(GDBusConnection *conn, const std::string &dev_path)
+{
+    bluez_set_property_bool(conn, dev_path, "org.bluez.Device1", "Trusted", true);
 }
 
 static void bluez_remove_device(const std::string &mac)
 {
-    std::string out;
-    run_cmd_output("bluetoothctl remove " + to_upper_mac(mac) + " 2>&1", out);
-}
+    GDBusConnection *conn = bluez_get_system_bus();
+    if (!conn) return;
 
-static bool bluez_setup_adapter()
-{
-    std::string out;
-    run_cmd_output("bluetoothctl show 2>&1", out);
-    bool was_discoverable = (out.find("Discoverable: yes") != std::string::npos);
-
-    run_cmd_output("bluetoothctl power on 2>&1", out);
-    run_cmd_output("bluetoothctl pairable on 2>&1", out);
-    run_cmd_output("bluetoothctl discoverable on 2>&1", out);
-
-    return was_discoverable;
-}
-
-static void bluez_restore_adapter(bool was_discoverable)
-{
-    std::string out;
-    if (!was_discoverable)
+    std::string dev_path, adapter_path;
+    if (bluez_find_device_paths(conn, mac, dev_path, adapter_path) && !adapter_path.empty())
     {
-        run_cmd_output("bluetoothctl discoverable off 2>&1", out);
+        GVariant *res = g_dbus_connection_call_sync(
+            conn,
+            "org.bluez",
+            adapter_path.c_str(),
+            "org.bluez.Adapter1",
+            "RemoveDevice",
+            g_variant_new("(o)", dev_path.c_str()),
+            nullptr,
+            G_DBUS_CALL_FLAGS_NONE,
+            DBUS_CALL_TIMEOUT_MS,
+            nullptr,
+            nullptr);
+        if (res) g_variant_unref(res);
     }
+
+    g_object_unref(conn);
 }
 
-static bool bluez_provision_device_info(const std::string &host_mac, const std::string &dev_mac)
+static bool bluez_setup_adapter(
+    GDBusConnection *conn,
+    const std::string &host_mac,
+    std::string &out_adapter_path,
+    bool &out_was_discoverable,
+    bool &out_was_pairable,
+    bool &out_was_powered)
 {
-    if (!is_valid_mac(host_mac) || !is_valid_mac(dev_mac))
+    out_adapter_path = bluez_find_adapter_path(conn, host_mac);
+    if (out_adapter_path.empty())
     {
         return false;
     }
 
-    const std::string host_upper = to_upper_mac(host_mac);
-    const std::string dev_upper = to_upper_mac(dev_mac);
-    const std::string dir_path = "/var/lib/bluetooth/" + host_upper + "/" + dev_upper;
-    const std::string file_path = dir_path + "/info";
+    out_was_discoverable = false;
+    out_was_pairable = false;
+    out_was_powered = false;
 
-    std::error_code ec;
-    std::filesystem::create_directories(dir_path, ec);
-    if (ec)
-    {
-        SERVER_LOG_ERROR("BlueZ") << "Failed to create directory: " << dir_path << " (" << ec.message() << ")";
-        return false;
-    }
+    bluez_get_property_bool(conn, out_adapter_path, "org.bluez.Adapter1", "Discoverable", out_was_discoverable);
+    bluez_get_property_bool(conn, out_adapter_path, "org.bluez.Adapter1", "Pairable", out_was_pairable);
+    bluez_get_property_bool(conn, out_adapter_path, "org.bluez.Adapter1", "Powered", out_was_powered);
 
-    std::filesystem::permissions(dir_path,
-        std::filesystem::perms::owner_all |
-        std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
-        std::filesystem::perms::others_read | std::filesystem::perms::others_exec,
-        std::filesystem::perm_options::replace, ec);
-
-    std::ofstream info_file(file_path, std::ios::trunc);
-    if (!info_file.is_open())
-    {
-        SERVER_LOG_ERROR("BlueZ") << "Failed to write device info: " << file_path;
-        return false;
-    }
-
-    info_file << "# Generated automatically by PSMoveService for PS Move HID pairing\n";
-    info_file << "# Remove or unpair via PSMoveConfigTool\n";
-    info_file << "[General]\n";
-    info_file << "Name=Motion Controller\n";
-    info_file << "Class=0x002508\n";
-    info_file << "SupportedTechnologies=BR/EDR;\n";
-    info_file << "Trusted=true\n";
-    info_file << "Blocked=false\n";
-    info_file << "Services=00001124-0000-1000-8000-00805f9b34fb;\n";
-    info_file.close();
-
-    std::filesystem::permissions(file_path,
-        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
-        std::filesystem::perms::group_read | std::filesystem::perms::others_read,
-        std::filesystem::perm_options::replace, ec);
+    bluez_set_property_bool(conn, out_adapter_path, "org.bluez.Adapter1", "Powered", true);
+    bluez_set_property_bool(conn, out_adapter_path, "org.bluez.Adapter1", "Pairable", true);
+    bluez_set_property_bool(conn, out_adapter_path, "org.bluez.Adapter1", "Discoverable", true);
 
     return true;
 }
 
-static void bluez_cleanup_device_dir(const std::string &host_mac, const std::string &dev_mac)
+static void bluez_restore_adapter(
+    GDBusConnection *conn,
+    const std::string &adapter_path,
+    bool was_discoverable,
+    bool was_pairable,
+    bool was_powered)
 {
-    if (is_valid_mac(host_mac) && is_valid_mac(dev_mac))
-    {
-        const std::string dir_path = "/var/lib/bluetooth/" + to_upper_mac(host_mac) + "/" + to_upper_mac(dev_mac);
-        std::error_code ec;
-        std::filesystem::remove_all(dir_path, ec);
-    }
+    if (!conn || adapter_path.empty()) return;
+    bluez_set_property_bool(conn, adapter_path, "org.bluez.Adapter1", "Discoverable", was_discoverable);
+    bluez_set_property_bool(conn, adapter_path, "org.bluez.Adapter1", "Pairable", was_pairable);
+    bluez_set_property_bool(conn, adapter_path, "org.bluez.Adapter1", "Powered", was_powered);
 }
+
+// -- BluezPairingAgent -----
+class BluezPairingAgent
+{
+public:
+    BluezPairingAgent()
+        : m_context(nullptr)
+        , m_loop(nullptr)
+        , m_stop_requested(false)
+    {
+    }
+
+    ~BluezPairingAgent()
+    {
+        stop();
+    }
+
+    bool start(const std::string &target_mac, const std::string &host_mac)
+    {
+        stop();
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_stop_requested = false;
+            m_context = nullptr;
+            m_loop = nullptr;
+            m_host_mac = host_mac;
+        }
+
+        std::string formatted_mac = to_upper_mac(target_mac);
+        std::replace(formatted_mac.begin(), formatted_mac.end(), ':', '_');
+        m_target_dev_suffix = "/DEV_" + formatted_mac;
+
+        std::promise<bool> ready_promise;
+        std::future<bool> ready_future = ready_promise.get_future();
+
+        try
+        {
+            m_thread = std::thread(&BluezPairingAgent::threadFunc, this, std::move(ready_promise));
+        }
+        catch (...)
+        {
+            SERVER_MT_LOG_ERROR("BluezPairingAgent") << "Failed to spawn GDBus agent thread";
+            return false;
+        }
+
+        if (!ready_future.get())
+        {
+            if (m_thread.joinable())
+            {
+                m_thread.join();
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    void stop()
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_stop_requested = true;
+            if (m_context != nullptr && m_loop != nullptr)
+            {
+                g_main_context_invoke_full(
+                    m_context,
+                    G_PRIORITY_DEFAULT,
+                    &BluezPairingAgent::onQuitInvoke,
+                    g_main_loop_ref(m_loop),
+                    reinterpret_cast<GDestroyNotify>(g_main_loop_unref));
+            }
+        }
+
+        if (m_thread.joinable())
+        {
+            m_thread.join();
+        }
+    }
+
+private:
+    static gboolean onQuitInvoke(gpointer user_data)
+    {
+        GMainLoop *loop = static_cast<GMainLoop *>(user_data);
+        g_main_loop_quit(loop);
+        return G_SOURCE_REMOVE;
+    }
+
+    bool matchesTargetDevice(const char *device_path) const
+    {
+        if (!device_path || m_target_dev_suffix.empty())
+        {
+            return false;
+        }
+
+        std::string path_upper = to_upper_mac(device_path);
+        if (path_upper.length() < m_target_dev_suffix.length())
+        {
+            return false;
+        }
+
+        return path_upper.compare(
+            path_upper.length() - m_target_dev_suffix.length(),
+            m_target_dev_suffix.length(),
+            m_target_dev_suffix) == 0;
+    }
+
+    static void trustDeviceAsync(GDBusConnection *conn, const char *device_path)
+    {
+        if (!conn || !device_path) return;
+
+        g_dbus_connection_call(
+            conn,
+            "org.bluez",
+            device_path,
+            "org.freedesktop.DBus.Properties",
+            "Set",
+            g_variant_new("(ssv)", "org.bluez.Device1", "Trusted", g_variant_new_boolean(TRUE)),
+            nullptr,
+            G_DBUS_CALL_FLAGS_NONE,
+            DBUS_CALL_TIMEOUT_MS,
+            nullptr,
+            nullptr,
+            nullptr);
+    }
+
+    std::string generateZcm1Pin() const
+    {
+        std::string pin = "0000";
+        if (is_valid_mac(m_host_mac))
+        {
+            unsigned int mac[6];
+            if (sscanf(m_host_mac.c_str(), "%x:%x:%x:%x:%x:%x",
+                &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6)
+            {
+                char buffer[7];
+                buffer[0] = static_cast<char>(mac[5]);
+                buffer[1] = static_cast<char>(mac[4]);
+                buffer[2] = static_cast<char>(mac[3]);
+                buffer[3] = static_cast<char>(mac[2]);
+                buffer[4] = static_cast<char>(mac[1]);
+                buffer[5] = static_cast<char>(mac[0]);
+                buffer[6] = '\0';
+                pin = std::string(buffer, 6);
+            }
+        }
+        return pin;
+    }
+
+    static void onMethodCall(
+        GDBusConnection *connection,
+        const gchar * /*sender*/,
+        const gchar * /*object_path*/,
+        const gchar * /*interface_name*/,
+        const gchar *method_name,
+        GVariant *parameters,
+        GDBusMethodInvocation *invocation,
+        gpointer user_data)
+    {
+        BluezPairingAgent *self = static_cast<BluezPairingAgent *>(user_data);
+
+        if (g_strcmp0(method_name, "AuthorizeService") == 0)
+        {
+            const gchar *device_path = nullptr;
+            const gchar *uuid = nullptr;
+            g_variant_get(parameters, "(&o&s)", &device_path, &uuid);
+
+            if (self->matchesTargetDevice(device_path) &&
+                (g_ascii_strcasecmp(uuid, k_hid_service_uuid) == 0 ||
+                 g_ascii_strcasecmp(uuid, "1124") == 0))
+            {
+                SERVER_MT_LOG_INFO("BluezPairingAgent") << "Authorized HID service for " << device_path;
+                trustDeviceAsync(connection, device_path);
+                g_dbus_method_invocation_return_value(invocation, nullptr);
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "RequestPinCode") == 0)
+        {
+            const gchar *device_path = nullptr;
+            g_variant_get(parameters, "(&o)", &device_path);
+
+            if (self->matchesTargetDevice(device_path))
+            {
+                SERVER_MT_LOG_INFO("BluezPairingAgent") << "Providing PIN code for " << device_path;
+                trustDeviceAsync(connection, device_path);
+                
+                g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", "0000"));
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "RequestPasskey") == 0)
+        {
+            const gchar *device_path = nullptr;
+            g_variant_get(parameters, "(&o)", &device_path);
+
+            if (self->matchesTargetDevice(device_path))
+            {
+                trustDeviceAsync(connection, device_path);
+                g_dbus_method_invocation_return_value(invocation, g_variant_new("(u)", 0));
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "RequestConfirmation") == 0)
+        {
+            const gchar *device_path = nullptr;
+            guint32 passkey = 0;
+            g_variant_get(parameters, "(&ou)", &device_path, &passkey);
+
+            if (self->matchesTargetDevice(device_path))
+            {
+                trustDeviceAsync(connection, device_path);
+                g_dbus_method_invocation_return_value(invocation, nullptr);
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "RequestAuthorization") == 0)
+        {
+            const gchar *device_path = nullptr;
+            g_variant_get(parameters, "(&o)", &device_path);
+
+            if (self->matchesTargetDevice(device_path))
+            {
+                trustDeviceAsync(connection, device_path);
+                g_dbus_method_invocation_return_value(invocation, nullptr);
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "DisplayPinCode") == 0)
+        {
+            const gchar *device_path = nullptr;
+            const gchar *pincode = nullptr;
+            g_variant_get(parameters, "(&o&s)", &device_path, &pincode);
+
+            if (self->matchesTargetDevice(device_path))
+            {
+                g_dbus_method_invocation_return_value(invocation, nullptr);
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "DisplayPasskey") == 0)
+        {
+            const gchar *device_path = nullptr;
+            guint32 passkey = 0;
+            guint16 entered = 0;
+            g_variant_get(parameters, "(&ouq)", &device_path, &passkey, &entered);
+
+            if (self->matchesTargetDevice(device_path))
+            {
+                g_dbus_method_invocation_return_value(invocation, nullptr);
+            }
+            else
+            {
+                g_dbus_method_invocation_return_dbus_error(
+                    invocation, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
+        else if (g_strcmp0(method_name, "Release") == 0 || g_strcmp0(method_name, "Cancel") == 0)
+        {
+            g_dbus_method_invocation_return_value(invocation, nullptr);
+        }
+        else
+        {
+            g_dbus_method_invocation_return_dbus_error(
+                invocation, "org.bluez.Error.Rejected", "Unsupported method");
+        }
+    }
+
+    void threadFunc(std::promise<bool> ready_promise)
+    {
+        GMainContext *context = g_main_context_new();
+        g_main_context_push_thread_default(context);
+
+        GError *error = nullptr;
+        GDBusConnection *conn = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
+        if (!conn)
+        {
+            SERVER_MT_LOG_ERROR("BluezPairingAgent") << "Failed to connect to system D-Bus: "
+                << (error ? error->message : "unknown");
+            if (error) g_error_free(error);
+            g_main_context_pop_thread_default(context);
+            g_main_context_unref(context);
+            ready_promise.set_value(false);
+            return;
+        }
+
+        GDBusNodeInfo *node_info = g_dbus_node_info_new_for_xml(k_bluez_agent_introspection_xml, &error);
+        if (!node_info)
+        {
+            SERVER_MT_LOG_ERROR("BluezPairingAgent") << "Failed to parse introspection XML: "
+                << (error ? error->message : "unknown");
+            if (error) g_error_free(error);
+            g_object_unref(conn);
+            g_main_context_pop_thread_default(context);
+            g_main_context_unref(context);
+            ready_promise.set_value(false);
+            return;
+        }
+
+        static const GDBusInterfaceVTable vtable = {
+            &BluezPairingAgent::onMethodCall,
+            nullptr,
+            nullptr,
+            { nullptr }
+        };
+
+        guint reg_id = g_dbus_connection_register_object(
+            conn,
+            k_agent_object_path,
+            node_info->interfaces[0],
+            &vtable,
+            this,
+            nullptr,
+            &error);
+
+        if (reg_id == 0)
+        {
+            SERVER_MT_LOG_ERROR("BluezPairingAgent") << "Failed to register agent object: "
+                << (error ? error->message : "unknown");
+            if (error) g_error_free(error);
+            g_dbus_node_info_unref(node_info);
+            g_object_unref(conn);
+            g_main_context_pop_thread_default(context);
+            g_main_context_unref(context);
+            ready_promise.set_value(false);
+            return;
+        }
+
+        GVariant *res = g_dbus_connection_call_sync(
+            conn,
+            "org.bluez",
+            "/org/bluez",
+            "org.bluez.AgentManager1",
+            "RegisterAgent",
+            g_variant_new("(os)", k_agent_object_path, "NoInputNoOutput"),
+            nullptr,
+            G_DBUS_CALL_FLAGS_NONE,
+            DBUS_CALL_TIMEOUT_MS,
+            nullptr,
+            &error);
+
+        if (!res)
+        {
+            SERVER_MT_LOG_ERROR("BluezPairingAgent") << "RegisterAgent failed: "
+                << (error ? error->message : "unknown");
+            if (error) g_error_free(error);
+            g_dbus_connection_unregister_object(conn, reg_id);
+            g_dbus_node_info_unref(node_info);
+            g_object_unref(conn);
+            g_main_context_pop_thread_default(context);
+            g_main_context_unref(context);
+            ready_promise.set_value(false);
+            return;
+        }
+        g_variant_unref(res);
+
+        res = g_dbus_connection_call_sync(
+            conn,
+            "org.bluez",
+            "/org/bluez",
+            "org.bluez.AgentManager1",
+            "RequestDefaultAgent",
+            g_variant_new("(o)", k_agent_object_path),
+            nullptr,
+            G_DBUS_CALL_FLAGS_NONE,
+            DBUS_CALL_TIMEOUT_MS,
+            nullptr,
+            &error);
+
+        if (!res)
+        {
+            SERVER_MT_LOG_WARNING("BluezPairingAgent") << "RequestDefaultAgent warning: "
+                << (error ? error->message : "unknown");
+            if (error)
+            {
+                g_error_free(error);
+                error = nullptr;
+            }
+        }
+        else
+        {
+            g_variant_unref(res);
+        }
+
+        GMainLoop *loop = g_main_loop_new(context, FALSE);
+        bool should_run = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_context = g_main_context_ref(context);
+            m_loop = g_main_loop_ref(loop);
+            should_run = !m_stop_requested;
+        }
+
+        ready_promise.set_value(true);
+
+        if (should_run)
+        {
+            g_main_loop_run(loop);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_loop)
+            {
+                g_main_loop_unref(m_loop);
+                m_loop = nullptr;
+            }
+            if (m_context)
+            {
+                g_main_context_unref(m_context);
+                m_context = nullptr;
+            }
+        }
+        g_main_loop_unref(loop);
+
+        res = g_dbus_connection_call_sync(
+            conn,
+            "org.bluez",
+            "/org/bluez",
+            "org.bluez.AgentManager1",
+            "UnregisterAgent",
+            g_variant_new("(o)", k_agent_object_path),
+            nullptr,
+            G_DBUS_CALL_FLAGS_NONE,
+            DBUS_CALL_TIMEOUT_MS,
+            nullptr,
+            nullptr);
+        if (res) g_variant_unref(res);
+
+        g_dbus_connection_unregister_object(conn, reg_id);
+        g_dbus_node_info_unref(node_info);
+        g_object_unref(conn);
+
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+    }
+
+    std::string m_target_dev_suffix;
+    std::string m_host_mac;
+    std::mutex m_mutex;
+    GMainContext *m_context;
+    GMainLoop *m_loop;
+    bool m_stop_requested;
+    std::thread m_thread;
+};
 
 // -- definitions -----
 class BluetoothAsyncOperationState
@@ -232,6 +923,11 @@ public:
 
     virtual ~BluetoothAsyncOperationState()
     {
+        joinWorkerThread();
+    }
+
+    void joinWorkerThread()
+    {
         if (worker_thread.joinable())
         {
             worker_thread.join();
@@ -240,13 +936,17 @@ public:
 
     virtual void initialize(const int id)
     {
+        joinWorkerThread();
+
         controller_id = id;
         main_thread_id = std::this_thread::get_id();
-        worker_thread_id = main_thread_id;
+        worker_thread_id.store(main_thread_id);
 
         subStatus_WorkerThread.store(0);
         isCanceled_WorkerThread.store(false);
-        subStatus_MainThread = 0;
+
+        std::lock_guard<std::mutex> lock(status_mutex);
+        status_queue.clear();
     }
 
     inline bool isMainThread() const
@@ -256,7 +956,7 @@ public:
 
     inline bool isWorkerThread() const
     {
-        return std::this_thread::get_id() == worker_thread_id;
+        return std::this_thread::get_id() == worker_thread_id.load();
     }
 
     int getControllerID() const
@@ -267,7 +967,14 @@ public:
     template <typename t_enum_status>
     void setSubStatus_WorkerThread(t_enum_status newSubStatus)
     {
-        subStatus_WorkerThread.store(static_cast<int32_t>(newSubStatus));
+        int32_t val = static_cast<int32_t>(newSubStatus);
+        subStatus_WorkerThread.store(val);
+
+        std::lock_guard<std::mutex> lock(status_mutex);
+        if (status_queue.empty() || status_queue.back() != val)
+        {
+            status_queue.push_back(val);
+        }
     }
 
     template <typename t_enum_status>
@@ -285,11 +992,11 @@ public:
     bool pollSubStatus_MainThread(t_enum_status &outNewSubStatus)
     {
         assert(isMainThread());
-        int32_t newSubStatus = subStatus_WorkerThread.load();
-        if (newSubStatus != subStatus_MainThread)
+        std::lock_guard<std::mutex> lock(status_mutex);
+        if (!status_queue.empty())
         {
-            subStatus_MainThread = newSubStatus;
-            outNewSubStatus = static_cast<t_enum_status>(newSubStatus);
+            outNewSubStatus = static_cast<t_enum_status>(status_queue.front());
+            status_queue.pop_front();
             return true;
         }
         return false;
@@ -307,14 +1014,15 @@ public:
         isCanceled_WorkerThread.store(true);
     }
 
-    std::thread::id worker_thread_id;
+    std::atomic<std::thread::id> worker_thread_id;
 
 protected:
     int controller_id;
     std::thread::id main_thread_id;
     std::atomic<int32_t> subStatus_WorkerThread;
     std::atomic<bool> isCanceled_WorkerThread;
-    int32_t subStatus_MainThread;
+    std::mutex status_mutex;
+    std::deque<int32_t> status_queue;
 };
 
 class BluetoothUnpairDeviceState : public BluetoothAsyncOperationState
@@ -449,19 +1157,13 @@ bool AsyncBluetoothUnpairDeviceRequest::start()
 
 static void AsyncBluetoothUnpairDeviceThreadFunction(BluetoothUnpairDeviceState *state)
 {
-    state->worker_thread_id = std::this_thread::get_id();
+    state->worker_thread_id.store(std::this_thread::get_id());
     state->setSubStatus_WorkerThread(BluetoothUnpairDeviceState::removingBluetoothDevice);
 
     const std::string mac = state->getControllerAddress();
     SERVER_MT_LOG_INFO("AsyncBluetoothUnpairDeviceRequest") << "Removing device from BlueZ: " << mac;
 
     bluez_remove_device(mac);
-
-    std::string host_mac;
-    if (bluetooth_get_host_address(host_mac))
-    {
-        bluez_cleanup_device_dir(host_mac, mac);
-    }
 
     state->setSubStatus_WorkerThread(BluetoothUnpairDeviceState::success);
 }
@@ -471,7 +1173,7 @@ void AsyncBluetoothUnpairDeviceRequest::update()
     BluetoothUnpairDeviceState *state = reinterpret_cast<BluetoothUnpairDeviceState *>(m_internal_state);
 
     BluetoothUnpairDeviceState::eStatus subStatus;
-    if (state->pollSubStatus_MainThread(subStatus))
+    while (state->pollSubStatus_MainThread(subStatus))
     {
         send_progress_notification_to_client(
             m_connectionId,
@@ -496,16 +1198,12 @@ void AsyncBluetoothUnpairDeviceRequest::update()
                     ? PSMoveProtocol::Response_ResultCode_RESULT_CANCELED
                     : PSMoveProtocol::Response_ResultCode_RESULT_ERROR);
             }
-
-            if (state->worker_thread.joinable())
-            {
-                state->worker_thread.join();
-            }
+            break;
         }
     }
 }
 
-void AsyncBluetoothUnpairDeviceRequest::cancel(AsyncBluetoothRequest::eCancelReason reason)
+void AsyncBluetoothUnpairDeviceRequest::cancel(AsyncBluetoothRequest::eCancelReason /*reason*/)
 {
     BluetoothUnpairDeviceState *state = reinterpret_cast<BluetoothUnpairDeviceState *>(m_internal_state);
     state->setIsCanceled_MainThread();
@@ -608,11 +1306,25 @@ bool AsyncBluetoothPairDeviceRequest::start()
 
 static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *state)
 {
-    state->worker_thread_id = std::this_thread::get_id();
+    state->worker_thread_id.store(std::this_thread::get_id());
     const std::string mac = state->controller_serial_string;
     const std::string host_mac = state->host_address_string;
+
+    GDBusConnection *conn = bluez_get_system_bus();
+    if (!conn)
+    {
+        state->setSubStatus_WorkerThread(BluetoothPairDeviceState::failed);
+        return;
+    }
+
     bool isCompleted = false;
+    bool adapter_configured = false;
     bool was_discoverable = false;
+    bool was_pairable = false;
+    bool was_powered = false;
+    std::string adapter_path;
+    std::string device_path;
+    BluezPairingAgent pairing_agent;
 
     state->setSubStatus_WorkerThread(BluetoothPairDeviceState::setupBluetoothRadio);
 
@@ -628,21 +1340,31 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
             {
             case BluetoothPairDeviceState::setupBluetoothRadio:
                 {
-                    SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Configuring BlueZ adapter and provisioning " << mac;
-                    was_discoverable = bluez_setup_adapter();
-                    bluez_provision_device_info(host_mac, mac);
+                    SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Configuring BlueZ adapter and starting agent for " << mac;
 
-                    std::system("systemctl restart bluetooth");
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    if (!bluez_setup_adapter(conn, host_mac, adapter_path, was_discoverable, was_pairable, was_powered))
+                    {
+                        SERVER_MT_LOG_ERROR("AsyncBluetoothPairDeviceRequest") << "Failed to configure BlueZ adapter";
+                        nextSubStatus = BluetoothPairDeviceState::failed;
+                        break;
+                    }
 
-                    bluez_trust_device(mac);
+                    adapter_configured = true;
+                    device_path = bluez_build_device_path(adapter_path, mac);
+
+                    if (!pairing_agent.start(mac, host_mac))
+                    {
+                        SERVER_MT_LOG_ERROR("AsyncBluetoothPairDeviceRequest") << "Failed to start BlueZ pairing agent";
+                        nextSubStatus = BluetoothPairDeviceState::failed;
+                        break;
+                    }
+
                     nextSubStatus = BluetoothPairDeviceState::deviceScan;
                 }
                 break;
 
             case BluetoothPairDeviceState::deviceScan:
                 {
-                    bluez_trust_device(mac);
                     state->connectionAttemptCount = 0;
                     nextSubStatus = BluetoothPairDeviceState::attemptConnection;
                 }
@@ -650,14 +1372,10 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
 
             case BluetoothPairDeviceState::attemptConnection:
                 {
-                    if (bluez_device_exists(mac))
-                    {
-                        bluez_trust_device(mac);
-                    }
-
-                    if (bluez_is_connected(mac))
+                    if (bluez_is_connected_by_path(conn, device_path))
                     {
                         SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Controller connected via BlueZ: " << mac;
+                        bluez_trust_device_by_path(conn, device_path);
                         nextSubStatus = BluetoothPairDeviceState::patchRegistry;
                     }
                     else
@@ -665,16 +1383,21 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
                         ++state->connectionAttemptCount;
                         if (state->connectionAttemptCount >= CONN_RETRIES)
                         {
-                            state->connectionAttemptCount = 0;
+                            SERVER_MT_LOG_ERROR("AsyncBluetoothPairDeviceRequest")
+                                << "Timed out waiting for Bluetooth connection from " << mac;
+                            nextSubStatus = BluetoothPairDeviceState::failed;
                         }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(CONN_DELAY));
+                        else
+                        {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(CONN_DELAY));
+                        }
                     }
                 }
                 break;
 
             case BluetoothPairDeviceState::patchRegistry:
                 {
-                    bluez_trust_device(mac);
+                    bluez_trust_device_by_path(conn, device_path);
                     state->verifyConnectionCount = 0;
                     nextSubStatus = BluetoothPairDeviceState::verifyConnection;
                 }
@@ -682,7 +1405,7 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
 
             case BluetoothPairDeviceState::verifyConnection:
                 {
-                    if (bluez_is_connected(mac))
+                    if (bluez_is_connected_by_path(conn, device_path))
                     {
                         ++state->verifyConnectionCount;
                         if (state->verifyConnectionCount >= CONN_CHECK_NUM_TRIES)
@@ -713,18 +1436,24 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
             nextSubStatus = BluetoothPairDeviceState::failed;
         }
 
+        if (nextSubStatus == BluetoothPairDeviceState::success ||
+            nextSubStatus == BluetoothPairDeviceState::failed)
+        {
+            pairing_agent.stop();
+            if (adapter_configured)
+            {
+                bluez_restore_adapter(conn, adapter_path, was_discoverable, was_pairable, was_powered);
+            }
+            isCompleted = true;
+        }
+
         if (nextSubStatus != subStatus)
         {
             state->setSubStatus_WorkerThread(nextSubStatus);
         }
-
-        if (nextSubStatus == BluetoothPairDeviceState::success ||
-            nextSubStatus == BluetoothPairDeviceState::failed)
-        {
-            bluez_restore_adapter(was_discoverable);
-            isCompleted = true;
-        }
     }
+
+    g_object_unref(conn);
 }
 
 void AsyncBluetoothPairDeviceRequest::update()
@@ -732,7 +1461,7 @@ void AsyncBluetoothPairDeviceRequest::update()
     BluetoothPairDeviceState *state = reinterpret_cast<BluetoothPairDeviceState *>(m_internal_state);
 
     BluetoothPairDeviceState::eStatus subStatus;
-    if (state->pollSubStatus_MainThread(subStatus))
+    while (state->pollSubStatus_MainThread(subStatus))
     {
         send_progress_notification_to_client(
             m_connectionId,
@@ -757,16 +1486,12 @@ void AsyncBluetoothPairDeviceRequest::update()
                     ? PSMoveProtocol::Response_ResultCode_RESULT_CANCELED
                     : PSMoveProtocol::Response_ResultCode_RESULT_ERROR);
             }
-
-            if (state->worker_thread.joinable())
-            {
-                state->worker_thread.join();
-            }
+            break;
         }
     }
 }
 
-void AsyncBluetoothPairDeviceRequest::cancel(AsyncBluetoothRequest::eCancelReason reason)
+void AsyncBluetoothPairDeviceRequest::cancel(AsyncBluetoothRequest::eCancelReason /*reason*/)
 {
     BluetoothPairDeviceState *state = reinterpret_cast<BluetoothPairDeviceState *>(m_internal_state);
     state->setIsCanceled_MainThread();
