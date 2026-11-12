@@ -1,0 +1,16 @@
+# V4L2 (/dev/video*)
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="1415", ATTRS{idProduct}=="2000", GROUP="psmovecam", MODE="0660", TAG-="uaccess"
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="05a9", ATTRS{idProduct}=="0543", GROUP="psmovecam", MODE="0660", TAG-="uaccess"
+
+# libusb raw USB (/dev/bus/usb/*)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1415", ATTRS{idProduct}=="2000", GROUP="psmovecam", MODE="0660"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="05a9", ATTRS{idProduct}=="0543", GROUP="psmovecam", MODE="0660"
+
+# Sony PS Move Controller & Navigation (USB)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="03d5", GROUP="psmovecam", MODE="0660"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="042f", GROUP="psmovecam", MODE="0660"
+
+# PS Move Bluetooth HID
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="03d5", GROUP="psmovecam", MODE="0660"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="042f", GROUP="psmovecam", MODE="0660"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="*054C:03D5*", GROUP="psmovecam", MODE="0660"

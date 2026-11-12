@@ -1,3 +1,4 @@
+#include <string>
 #ifndef APP_STAGE_OPTICAL_CALIBRATION_H
 #define APP_STAGE_OPTICAL_CALIBRATION_H
 

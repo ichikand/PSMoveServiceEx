@@ -1,3 +1,4 @@
+#include <string>
 #ifndef GEOMETRY_UTILITY_H
 #define GEOMETRY_UTILITY_H
 

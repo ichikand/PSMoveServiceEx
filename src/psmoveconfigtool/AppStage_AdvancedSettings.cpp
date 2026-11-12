@@ -1,3 +1,7 @@
+#ifndef _WIN32
+struct { void OpenConfigInExplorer() {} } configExec;
+#endif
+#include <opencv2/calib3d.hpp>
 //-- inludes -----
 #include "AppStage_MainMenu.h"
 #include "AppStage_AdvancedSettings.h"

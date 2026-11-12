@@ -1,3 +1,4 @@
+namespace cv { enum { CAP_MODE_BGR = 0, CAP_MODE_RGB = 1, CAP_MODE_GRAY = 2, CAP_MODE_YUYV = 3 }; }
 // -- includes -----
 #include "PS3EyeTracker.h"
 #include "ServerLog.h"
@@ -426,7 +427,7 @@ bool PS3EyeTracker::open(const DeviceEnumerator *enumerator)
 		VideoCapture->set(cv::CAP_PROP_GAIN, cfg.gain);
 		VideoCapture->set(cv::CAP_PROP_FPS, cfg.frame_rate);
 
-		VideoCapture->set(CV_CAP_PROP_MAXFAILPOLL, cfg.max_poll_failure_timeout_ms);
+		VideoCapture->set(cv::CAP_PROP_MAXFAILPOLL, cfg.max_poll_failure_timeout_ms);
     }
 
     return bSuccess;
@@ -451,7 +452,7 @@ IDeviceInterface::ePollResult PS3EyeTracker::poll()
 		// Prepare frames whenever we can.
 		if (VideoCapture->grab())
 		{
-			if ((bool)VideoCapture->get(CV_CAP_PROP_FRAMEAVAILABLE))
+			if ((bool)VideoCapture->get(cv::CAP_PROP_FRAMEAVAILABLE))
 			{
 				DeviceManager::getInstance()->m_tracker_manager->setTrackerReady(VideoCapture->getIndex());
 			}
@@ -471,14 +472,14 @@ IDeviceInterface::ePollResult PS3EyeTracker::poll()
 				}
 				else
 				{
-					CaptureData->frameWidth = VideoCapture->get(CV_CAP_PROP_FRAME_WIDTH);
-					CaptureData->frameHeight = VideoCapture->get(CV_CAP_PROP_FRAME_HEIGHT);
+					CaptureData->frameWidth = VideoCapture->get(cv::CAP_PROP_FRAME_WIDTH);
+					CaptureData->frameHeight = VideoCapture->get(cv::CAP_PROP_FRAME_HEIGHT);
 
 					// New data available. Keep iterating.
 					result = IControllerInterface::_PollResultSuccessNewData;
 
 					// We received the frame and every tracker polled. We need a new frame!
-					VideoCapture->set(CV_CAP_PROP_FRAMEAVAILABLE, false);
+					VideoCapture->set(cv::CAP_PROP_FRAMEAVAILABLE, false);
 				}
 			}
 		}

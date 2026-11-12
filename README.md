@@ -13,6 +13,42 @@ A background service that manages multiple PSMove Controllers and PS3 Eye Camera
 * Use the [Wiki](https://github.com/Timocop/PSMoveServiceEx/wiki) for guidance and tutorials. **(WORK IN PROGRESS)**
 * Old general setup legacy guides, troubleshooting and design docs can be found on the [wiki](https://github.com/psmoveservice/PSMoveService/wiki)
 
+# 🐧 Linux Bluetooth (BlueZ) ZCM1 Pairing Workaround
+### Why automatic pairing may fail
+PS Move **ZCM1** controllers use the host Bluetooth adapter's MAC address (6 raw bytes in reverse order) as their legacy pairing PIN. However, BlueZ's D-Bus `RequestPinCode` method strictly requires valid **UTF-8** strings and rejects `0x00` bytes or bytes `>= 0x80`.
+
+If your Bluetooth adapter has `00` or values `80–FF` in its MAC address (such as common CSR clones with `00:1A:7D:DA:71:13`), automatic D-Bus pairing will time out.
+
+### Manual Pairing Workaround
+1. **Write the host MAC to the controller via USB:**  
+   Connect the PS Move controller via USB while `PSMoveServiceEx` is running and click **Pair** in the Config Tool (even if the Bluetooth step fails, this writes the host MAC into the controller and logs its MAC address).
+2. **Register the controller in BlueZ:**  
+   Replace `<HOST_MAC>` (uppercase) and `<CONTROLLER_MAC>` (uppercase), and set `Key` to the **reversed** `<HOST_MAC>` bytes padded with zeros to 32 hex characters (e.g., `00:1A:7D:DA:71:13` → `1371DA7D1A0000000000000000000000`):
+   ```bash
+   HOST="<HOST_MAC>"
+   DEV="<CONTROLLER_MAC>"
+
+   sudo mkdir -p "/var/lib/bluetooth/$HOST/$DEV"
+   sudo tee "/var/lib/bluetooth/$HOST/$DEV/info" > /dev/null << 'EOF'
+   [General]
+   Name=Motion Controller
+   Class=0x002508
+   SupportedTechnologies=BR/EDR;
+   Trusted=true
+   Blocked=false
+   Services=00001124-0000-1000-8000-00805f9b34fb;
+
+   [LinkKey]
+   Key=1371DA7D1A0000000000000000000000
+   Type=4
+   PINLength=6
+   EOF
+
+   sudo systemctl restart bluetooth
+   ```
+3. **Connect:**  
+   Unplug the USB cable and press the **PS** button on the controller.
+
 # ❓ Getting Help
 Please start with the wiki. If you can't find help with your problem then please search through the issues (especially the closed ones) to see if your problem has been addressed already. 
 If you still find no previous mention of your problem then you have these options:

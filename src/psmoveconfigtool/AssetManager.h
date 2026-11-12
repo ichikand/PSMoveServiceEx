@@ -1,3 +1,4 @@
+#include <string>
 #ifndef ASSET_MANAGER_H
 #define ASSET_MANAGER_H
 

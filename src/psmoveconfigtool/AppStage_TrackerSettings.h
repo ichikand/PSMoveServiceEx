@@ -1,3 +1,4 @@
+#include <string>
 #ifndef APP_STAGE_TRACKER_SETTINGS_H
 #define APP_STAGE_TRACKER_SETTINGS_H
 

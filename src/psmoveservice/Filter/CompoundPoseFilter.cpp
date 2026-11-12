@@ -95,7 +95,7 @@ void CompoundPoseFilter::allocate_filters(
 		break;
 	case OrientationFilterTypeExternal:
 #if !defined(IS_TESTING_KALMAN)
-		m_orientation_filter = new OrientationFilterExternal;
+		m_orientation_filter = nullptr;
 #else
 		m_orientation_filter = nullptr;
 #endif
@@ -123,7 +123,7 @@ void CompoundPoseFilter::allocate_filters(
 		break;
 	case PositionFilterTypeExternalAttachment:
 #if !defined(IS_TESTING_KALMAN)
-		m_position_filter = new PositionFilterExternalAttachment;
+		m_position_filter = nullptr;
 #else
 		m_position_filter = nullptr;
 #endif

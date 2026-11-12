@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 #include "GeometryUtility.h"
 #include "MathGLM.h"
 

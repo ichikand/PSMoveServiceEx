@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 //-- includes -----
 #include "Camera.h"
 #include "MathUtility.h"

@@ -1,3 +1,4 @@
+namespace cv { enum { CAP_PROP_FRAMEAVAILABLE = -999, CAP_PROP_WAITFRAME = -998, CAP_PROP_MAXFAILPOLL = -997 }; }
 #ifndef PSEYE_VIDEO_CAPTURE_H
 #define PSEYE_VIDEO_CAPTURE_H
 
@@ -5,9 +6,9 @@
 
 enum
 {
-	CV_CAP_PROP_FRAMEAVAILABLE = -999,
-	CV_CAP_PROP_WAITFRAME,
-	CV_CAP_PROP_MAXFAILPOLL,
+	CAP_PROP_FRAMEAVAILABLE = -999,
+	CAP_PROP_WAITFRAME,
+	CAP_PROP_MAXFAILPOLL,
 };
 
 /// Video capture class that prioritizes PS3 Eye devices.
@@ -57,7 +58,7 @@ public:
     /*
     If a PS3 Eye device is not found, fall back to base class cv::VideoCapture::open(index)
     */
-    bool open(int index) override;
+    bool open(int index);
 
     /// Use cv::VideoCapture::set() unless \ref eyeType == PSEYE_CLEYE_DRIVER
     bool set(int propId, double value) override;

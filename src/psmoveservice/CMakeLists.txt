@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 
 # Dependencies
 set(PSMOVE_SERVICE_INCL_DIRS)
@@ -87,6 +87,10 @@ ELSE()
     list(APPEND PSMOVESERVICE_PLATFORM_SRC
         ${CMAKE_CURRENT_LIST_DIR}/Platform/BluetoothRequestsLinux.cpp
         ${CMAKE_CURRENT_LIST_DIR}/Platform/BluetoothQueriesLinux.cpp)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GIO REQUIRED gio-2.0)
+    list(APPEND PSMOVE_SERVICE_INCL_DIRS ${GIO_INCLUDE_DIRS})
+    list(APPEND PSMOVE_SERVICE_REQ_LIBS ${GIO_LIBRARIES})
 ENDIF()
 source_group("Platform" FILES ${PSMOVESERVICE_PLATFORM_SRC})
 
@@ -208,6 +212,7 @@ list(APPEND PSMOVE_SERVICE_INCL_DIRS ${PSEYE_INCLUDE_DIRS})
 list(APPEND PSMOVE_SERVICE_REQ_LIBS ${PSEYE_LIBRARIES})
 
 add_executable(PSMoveService ${PSMOVESERVICE_SRC})
+target_include_directories(PSMoveService PRIVATE /usr/include/opencv4)
 target_include_directories(PSMoveService PUBLIC ${PSMOVE_SERVICE_INCL_DIRS})
 target_link_libraries(PSMoveService ${PSMOVE_SERVICE_REQ_LIBS})
 
@@ -253,6 +258,7 @@ ENDIF()
 IF(MSVC)
 	# Create the new PSMS admin exe (same code as PSMS)
 	add_executable(PSMoveServiceAdmin ${PSMOVESERVICE_SRC})
+target_include_directories(PSMoveService PRIVATE /usr/include/opencv4)
 	target_include_directories(PSMoveServiceAdmin PUBLIC ${PSMOVE_SERVICE_INCL_DIRS})
 	target_link_libraries(PSMoveServiceAdmin ${PSMOVE_SERVICE_REQ_LIBS})
 	

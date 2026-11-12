@@ -1,3 +1,4 @@
+#include <string>
 #ifndef APP_STAGE_SERVICE_SETTINGS_H
 #define APP_STAGE_SERVICE_SETTINGS_H
 

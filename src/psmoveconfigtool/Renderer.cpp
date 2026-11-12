@@ -1,3 +1,4 @@
+#include <opencv2/calib3d.hpp>
 //-- includes -----
 #include "Renderer.h"
 #include "ClientGeometry_CAPI.h"

@@ -1,0 +1,2 @@
+g psmovecam -
+u psmovecam - "PSMoveService Daemon" /var/lib/psmove /usr/bin/nologin
