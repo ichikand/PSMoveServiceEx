@@ -858,7 +858,6 @@ private:
             return;
         }
 
-        // Use DisplayYesNo so BlueZ invokes RequestPinCode / RequestConfirmation / AuthorizeService
         GVariant *res = g_dbus_connection_call_sync(
             conn,
             "org.bluez",
@@ -1346,10 +1345,6 @@ bool AsyncBluetoothPairDeviceRequest::start()
             SERVER_LOG_INFO("AsyncBluetoothPairDeviceRequest")
                 << "Assigned host address " << state->host_address_string
                 << " to controller id " << controller_id;
-
-            // Release the USB handle so the kernel hidraw driver can bind/trigger udev
-            // for BlueZ's sixaxis plugin to compute and store the LinkKey natively.
-            m_controllerView->close();
         }
         else
         {
@@ -1451,8 +1446,6 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
                     if (device_exists)
                     {
                         device_path = found_dev_path;
-                        // Pre-trust the device as soon as BlueZ registers it (e.g. via sixaxis plugin)
-                        // so incoming L2CAP HID connections from the controller aren't rejected.
                         bluez_trust_device_by_path(conn, device_path);
 
                         if (bluez_is_connected_by_path(conn, device_path))
