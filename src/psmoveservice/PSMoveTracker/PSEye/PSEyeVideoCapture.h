@@ -1,15 +1,16 @@
-namespace cv { enum { CAP_PROP_FRAMEAVAILABLE = -999, CAP_PROP_WAITFRAME = -998, CAP_PROP_MAXFAILPOLL = -997 }; }
 #ifndef PSEYE_VIDEO_CAPTURE_H
 #define PSEYE_VIDEO_CAPTURE_H
 
 #include <opencv2/videoio.hpp>
 
+namespace cv {
 enum
 {
 	CAP_PROP_FRAMEAVAILABLE = -999,
 	CAP_PROP_WAITFRAME,
 	CAP_PROP_MAXFAILPOLL,
 };
+}
 
 /// Video capture class that prioritizes PS3 Eye devices.
 /**

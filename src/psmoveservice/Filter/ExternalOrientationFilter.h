@@ -1,4 +1,4 @@
-#ifndef _WIN32_COMPAT_DEFS
+#if !defined(_WIN32) && !defined(_WIN32_COMPAT_DEFS)
 #define _WIN32_COMPAT_DEFS
 typedef void* HANDLE;
 #define INVALID_HANDLE_VALUE ((void*)-1)
