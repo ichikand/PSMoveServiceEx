@@ -139,6 +139,27 @@ static bool is_valid_mac(const std::string &mac)
     return true;
 }
 
+static bool is_zcm1_dbus_pin_compatible(const std::string &mac)
+{
+    if (!is_valid_mac(mac)) return false;
+
+    unsigned int b[6];
+    if (sscanf(mac.c_str(), "%x:%x:%x:%x:%x:%x",
+        &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < 6; ++i)
+    {
+        if (b[i] == 0x00 || b[i] >= 0x80)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 static std::string bluez_build_device_path(const std::string &adapter_path, const std::string &dev_mac)
 {
     if (adapter_path.empty() || !is_valid_mac(dev_mac)) return "";
@@ -198,7 +219,8 @@ static bool bluez_get_property_bool(
     const std::string &object_path,
     const char *interface_name,
     const char *property_name,
-    bool &out_value)
+    bool &out_value,
+    bool log_errors = true)
 {
     if (!conn || object_path.empty()) return false;
 
@@ -218,7 +240,10 @@ static bool bluez_get_property_bool(
 
     if (!res)
     {
-        SERVER_MT_LOG_ERROR("BlueZ") << "Get property '" << property_name << "' on '" << interface_name << "' failed: " << (error ? error->message : "unknown");
+        if (log_errors)
+        {
+            SERVER_MT_LOG_ERROR("BlueZ") << "Get property '" << property_name << "' on '" << interface_name << "' failed: " << (error ? error->message : "unknown");
+        }
         if (error) g_error_free(error);
         return false;
     }
@@ -366,15 +391,30 @@ static bool bluez_find_device_paths(
 static bool bluez_is_connected_by_path(GDBusConnection *conn, const std::string &dev_path)
 {
     bool connected = false;
-    if (bluez_get_property_bool(conn, dev_path, "org.bluez.Device1", "Connected", connected))
+    if (bluez_get_property_bool(conn, dev_path, "org.bluez.Device1", "Connected", connected, false))
     {
         return connected;
     }
     return false;
 }
 
+static bool bluez_is_paired_by_path(GDBusConnection *conn, const std::string &dev_path)
+{
+    bool paired = false;
+    if (bluez_get_property_bool(conn, dev_path, "org.bluez.Device1", "Paired", paired, false))
+    {
+        return paired;
+    }
+    return false;
+}
+
 static void bluez_trust_device_by_path(GDBusConnection *conn, const std::string &dev_path)
 {
+    bool already_trusted = false;
+    if (bluez_get_property_bool(conn, dev_path, "org.bluez.Device1", "Trusted", already_trusted, false) && already_trusted)
+    {
+        return;
+    }
     bluez_set_property_bool(conn, dev_path, "org.bluez.Device1", "Trusted", true);
 }
 
@@ -571,27 +611,36 @@ private:
             nullptr);
     }
 
-    std::string generateZcm1Pin() const
+    bool tryGenerateValidUtf8Zcm1Pin(std::string &out_pin) const
     {
-        std::string pin = "0000";
-        if (is_valid_mac(m_host_mac))
+        if (!is_zcm1_dbus_pin_compatible(m_host_mac))
         {
-            unsigned int mac[6];
-            if (sscanf(m_host_mac.c_str(), "%x:%x:%x:%x:%x:%x",
-                &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6)
-            {
-                char buffer[7];
-                buffer[0] = static_cast<char>(mac[5]);
-                buffer[1] = static_cast<char>(mac[4]);
-                buffer[2] = static_cast<char>(mac[3]);
-                buffer[3] = static_cast<char>(mac[2]);
-                buffer[4] = static_cast<char>(mac[1]);
-                buffer[5] = static_cast<char>(mac[0]);
-                buffer[6] = '\0';
-                pin = std::string(buffer, 6);
-            }
+            return false;
         }
-        return pin;
+
+        unsigned int mac[6];
+        if (sscanf(m_host_mac.c_str(), "%x:%x:%x:%x:%x:%x",
+            &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6)
+        {
+            return false;
+        }
+
+        char buffer[7];
+        buffer[0] = static_cast<char>(mac[5]);
+        buffer[1] = static_cast<char>(mac[4]);
+        buffer[2] = static_cast<char>(mac[3]);
+        buffer[3] = static_cast<char>(mac[2]);
+        buffer[4] = static_cast<char>(mac[1]);
+        buffer[5] = static_cast<char>(mac[0]);
+        buffer[6] = '\0';
+
+        if (!g_utf8_validate(buffer, 6, nullptr))
+        {
+            return false;
+        }
+
+        out_pin.assign(buffer, 6);
+        return true;
     }
 
     static void onMethodCall(
@@ -633,10 +682,22 @@ private:
 
             if (self->matchesTargetDevice(device_path))
             {
-                SERVER_MT_LOG_INFO("BluezPairingAgent") << "Providing PIN code for " << device_path;
                 trustDeviceAsync(connection, device_path);
-                
-                g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", "0000"));
+
+                std::string pin;
+                if (self->tryGenerateValidUtf8Zcm1Pin(pin))
+                {
+                    SERVER_MT_LOG_INFO("BluezPairingAgent") << "Providing UTF-8 ZCM1 PIN code for " << device_path;
+                    g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", pin.c_str()));
+                }
+                else
+                {
+                    SERVER_MT_LOG_WARNING("BluezPairingAgent")
+                        << "Host MAC (" << self->m_host_mac
+                        << ") contains bytes outside 0x01-0x7F; D-Bus RequestPinCode cannot carry non-UTF8 bytes. "
+                        << "Falling back to '0000' (BlueZ 'sixaxis' hidraw plugin must handle ZCM1 pairing).";
+                    g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", "0000"));
+                }
             }
             else
             {
@@ -797,13 +858,14 @@ private:
             return;
         }
 
+        // Use DisplayYesNo so BlueZ invokes RequestPinCode / RequestConfirmation / AuthorizeService
         GVariant *res = g_dbus_connection_call_sync(
             conn,
             "org.bluez",
             "/org/bluez",
             "org.bluez.AgentManager1",
             "RegisterAgent",
-            g_variant_new("(os)", k_agent_object_path, "NoInputNoOutput"),
+            g_variant_new("(os)", k_agent_object_path, "DisplayYesNo"),
             nullptr,
             G_DBUS_CALL_FLAGS_NONE,
             DBUS_CALL_TIMEOUT_MS,
@@ -1272,11 +1334,22 @@ bool AsyncBluetoothPairDeviceRequest::start()
 
     if (success)
     {
+        if (!is_zcm1_dbus_pin_compatible(state->host_address_string))
+        {
+            SERVER_LOG_WARNING("AsyncBluetoothPairDeviceRequest")
+                << "Host adapter MAC (" << state->host_address_string
+                << ") has bytes outside 0x01-0x7F. ZCM1 pairing requires BlueZ's built-in 'sixaxis' hidraw plugin.";
+        }
+
         if (m_controllerView->setHostBluetoothAddress(state->host_address_string))
         {
             SERVER_LOG_INFO("AsyncBluetoothPairDeviceRequest")
                 << "Assigned host address " << state->host_address_string
                 << " to controller id " << controller_id;
+
+            // Release the USB handle so the kernel hidraw driver can bind/trigger udev
+            // for BlueZ's sixaxis plugin to compute and store the LinkKey natively.
+            m_controllerView->close();
         }
         else
         {
@@ -1372,25 +1445,44 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
 
             case BluetoothPairDeviceState::attemptConnection:
                 {
-                    if (bluez_is_connected_by_path(conn, device_path))
+                    std::string found_dev_path, found_adapter_path;
+                    const bool device_exists = bluez_find_device_paths(conn, mac, found_dev_path, found_adapter_path);
+
+                    if (device_exists)
                     {
-                        SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Controller connected via BlueZ: " << mac;
+                        device_path = found_dev_path;
+                        // Pre-trust the device as soon as BlueZ registers it (e.g. via sixaxis plugin)
+                        // so incoming L2CAP HID connections from the controller aren't rejected.
                         bluez_trust_device_by_path(conn, device_path);
-                        nextSubStatus = BluetoothPairDeviceState::patchRegistry;
+
+                        if (bluez_is_connected_by_path(conn, device_path))
+                        {
+                            SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Controller connected via BlueZ: " << mac;
+                            nextSubStatus = BluetoothPairDeviceState::patchRegistry;
+                            break;
+                        }
                     }
-                    else
+
+                    ++state->connectionAttemptCount;
+                    if (state->connectionAttemptCount >= CONN_RETRIES)
                     {
-                        ++state->connectionAttemptCount;
-                        if (state->connectionAttemptCount >= CONN_RETRIES)
+                        if (!device_exists && !is_zcm1_dbus_pin_compatible(host_mac))
                         {
                             SERVER_MT_LOG_ERROR("AsyncBluetoothPairDeviceRequest")
-                                << "Timed out waiting for Bluetooth connection from " << mac;
-                            nextSubStatus = BluetoothPairDeviceState::failed;
+                                << "Timed out waiting for " << mac
+                                << ". BlueZ 'sixaxis' plugin did not register the device over USB, and host MAC ("
+                                << host_mac << ") is incompatible with D-Bus UTF-8 PIN fallback.";
                         }
                         else
                         {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(CONN_DELAY));
+                            SERVER_MT_LOG_ERROR("AsyncBluetoothPairDeviceRequest")
+                                << "Timed out waiting for Bluetooth connection from " << mac;
                         }
+                        nextSubStatus = BluetoothPairDeviceState::failed;
+                    }
+                    else
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(CONN_DELAY));
                     }
                 }
                 break;
@@ -1410,7 +1502,8 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
                         ++state->verifyConnectionCount;
                         if (state->verifyConnectionCount >= CONN_CHECK_NUM_TRIES)
                         {
-                            SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Bluetooth connection verified!";
+                            SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Bluetooth connection verified! Paired="
+                                << (bluez_is_paired_by_path(conn, device_path) ? "true" : "false");
                             nextSubStatus = BluetoothPairDeviceState::success;
                         }
                         else
