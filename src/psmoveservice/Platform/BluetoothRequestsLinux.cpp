@@ -1387,6 +1387,7 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
 
     bool isCompleted = false;
     bool adapter_configured = false;
+    bool pair_requested = false;
     bool was_discoverable = false;
     bool was_pairable = false;
     bool was_powered = false;
@@ -1433,6 +1434,7 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
 
             case BluetoothPairDeviceState::deviceScan:
                 {
+                    pair_requested = false;
                     state->connectionAttemptCount = 0;
                     nextSubStatus = BluetoothPairDeviceState::attemptConnection;
                 }
