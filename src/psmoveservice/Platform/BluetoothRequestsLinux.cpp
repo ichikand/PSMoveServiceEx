@@ -1448,7 +1448,26 @@ static void AsyncBluetoothPairDeviceThreadFunction(BluetoothPairDeviceState *sta
                         device_path = found_dev_path;
                         bluez_trust_device_by_path(conn, device_path);
 
-                        if (bluez_is_connected_by_path(conn, device_path))
+                        if (!pair_requested && !bluez_is_paired_by_path(conn, device_path))
+                        {
+                            pair_requested = true;
+                            g_dbus_connection_call(
+                                conn,
+                                "org.bluez",
+                                device_path.c_str(),
+                                "org.bluez.Device1",
+                                "Pair",
+                                nullptr,
+                                nullptr,
+                                G_DBUS_CALL_FLAGS_NONE,
+                                10000,
+                                nullptr,
+                                nullptr,
+                                nullptr);
+                        }
+
+                        if (bluez_is_connected_by_path(conn, device_path) &&
+                            bluez_is_paired_by_path(conn, device_path))
                         {
                             SERVER_MT_LOG_INFO("AsyncBluetoothPairDeviceRequest") << "Controller connected via BlueZ: " << mac;
                             nextSubStatus = BluetoothPairDeviceState::patchRegistry;
